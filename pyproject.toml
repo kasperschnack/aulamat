@@ -1,0 +1,26 @@
+[build-system]
+requires = ["hatchling>=1.27.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "aula-project"
+version = "0.1.0"
+description = "Minimal CLI for reading and normalizing Aula messaging data."
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+  "aula>=1.1.0,<2",
+  "python-dotenv>=1.0.1,<2",
+]
+
+[project.scripts]
+aula-project = "aula_project.cli:main"
+
+[dependency-groups]
+dev = [
+  "pytest>=8.3.5,<9",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

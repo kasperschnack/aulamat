@@ -1,0 +1,24 @@
+[
+  {
+    "id": "msg-1",
+    "threadId": "thread-1",
+    "senderName": "Lærer Line",
+    "createdAt": "2026-04-28T16:40:00Z",
+    "messageHtml": "<p>Vi ses <strong>i morgen</strong>.</p>",
+    "attachments": [
+      {
+        "id": "file-1",
+        "fileName": "invitation.pdf",
+        "contentType": "application/pdf",
+        "downloadUrl": "https://example.invalid/files/file-1"
+      }
+    ]
+  },
+  {
+    "id": "msg-2",
+    "threadId": "thread-1",
+    "senderName": "Kasper Guardian",
+    "createdAt": "2026-04-28T16:41:00Z",
+    "messageText": "Tak for beskeden"
+  }
+]

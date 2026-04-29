@@ -1,0 +1,21 @@
+[
+  {
+    "id": "thread-1",
+    "subject": "Kontaktbog",
+    "participants": [
+      {"displayName": "Lærer Line"},
+      {"displayName": "Kasper Guardian"}
+    ],
+    "latestMessageTimestamp": "2026-04-28T16:42:00Z",
+    "unreadMessagesCount": 1,
+    "latestMessageText": "Vi ses til skole-hjem-samtale i morgen."
+  },
+  {
+    "id": "thread-2",
+    "title": "Meebook ugeplan",
+    "participants": [],
+    "createdAt": "2026-04-27T09:00:00Z",
+    "isUnread": false,
+    "provider": "Meebook"
+  }
+]

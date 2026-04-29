@@ -1,0 +1,13 @@
+{
+  "id": "guardian-1",
+  "displayName": "Kasper Guardian",
+  "role": "guardian",
+  "children": [
+    {
+      "id": "child-1",
+      "displayName": "Alma Elev",
+      "institutionId": "school-7",
+      "institutionName": "Aula Friskole"
+    }
+  ]
+}

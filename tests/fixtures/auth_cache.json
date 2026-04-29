@@ -1,0 +1,18 @@
+{
+  "timestamp": 1700000000,
+  "created_at": "2023-11-14 22:13:20",
+  "username": "guardian@example.invalid",
+  "tokens": {
+    "token_type": "Bearer",
+    "expires_in": 3600,
+    "access_token": "fake-access-token",
+    "refresh_token": "fake-refresh-token",
+    "expires_at": 1700003600
+  },
+  "cookies": {
+    "SimpleSAML": "simple-saml-cookie",
+    "AUTH_SESSION_ID": "auth-session-cookie",
+    "KEYCLOAK_SESSION": "keycloak-session-cookie",
+    "loginMethod": "mitid"
+  }
+}
