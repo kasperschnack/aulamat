@@ -10,3 +10,5 @@ __pycache__/
 .aula_scan_state.json
 *.tokens.json
 .aula_raw/
+HANDOVER_PROMPT.md
+PROJECT_PLAN.md
