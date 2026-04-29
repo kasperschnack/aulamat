@@ -65,6 +65,33 @@ def _build_parser() -> argparse.ArgumentParser:
     important_parser.add_argument("--include-low", action="store_true")
     important_parser.set_defaults(command="important")
 
+    review_new_parser = subparsers.add_parser(
+        "review-new",
+        help="Review messages received since the previous scheduled run.",
+    )
+    review_new_parser.add_argument("--thread-limit", type=int, default=None)
+    review_new_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Collect new messages without calling OpenAI or updating scan state.",
+    )
+    review_new_parser.add_argument(
+        "--no-openai",
+        action="store_true",
+        help="Collect new messages and update scan state without calling OpenAI.",
+    )
+    review_new_parser.add_argument(
+        "--no-update-state",
+        action="store_true",
+        help="Do not write the scan checkpoint after a successful run.",
+    )
+    review_new_parser.add_argument(
+        "--include-messages",
+        action="store_true",
+        help="Include full normalized messages in the JSON output for debugging.",
+    )
+    review_new_parser.set_defaults(command="review-new")
+
     return parser
 
 
@@ -146,6 +173,20 @@ async def _run_async(args: argparse.Namespace) -> int:
             "thread_limit": thread_limit,
             "items": [assessment.to_dict() for assessment in assessments],
         }
+        _render(payload, indent=settings.json_indent)
+        return 0
+
+    if args.command == "review-new":
+        thread_limit = args.thread_limit if args.thread_limit is not None else settings.default_limit
+        result = await client.review_new_messages(
+            thread_limit=thread_limit,
+            call_openai=not args.dry_run and not args.no_openai,
+            update_state=not args.dry_run and not args.no_update_state,
+            save_raw=args.save_raw,
+        )
+        payload = result.to_dict(include_messages=args.include_messages)
+        payload["thread_limit"] = thread_limit
+        payload["openai_model"] = settings.openai_model
         _render(payload, indent=settings.json_indent)
         return 0
 

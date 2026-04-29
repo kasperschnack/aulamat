@@ -7,5 +7,6 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 .aula_tokens.json
+.aula_scan_state.json
 *.tokens.json
 .aula_raw/

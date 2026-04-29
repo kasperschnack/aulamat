@@ -1,131 +1,278 @@
 # Handover Prompt
 
-Continue this repo as a focused Aula data project.
+Continue this repo as a focused Aula message-triage project.
 
-Start by reading `PROJECT_PLAN.md`, then inspect the existing implementation under `src/aula_project/`.
+Start by reading `PROJECT_PLAN.md`, then inspect `src/aula_project/`, especially:
+
+- `client.py`
+- `normalize.py`
+- `triage.py`
+- `scheduled_review.py`
+- `openai_review.py`
+- `scan_state.py`
+- `cli.py`
 
 ## Current Status
 
-- The repo now contains a minimal Python CLI project managed with `uv`.
+- The repo is a minimal Python CLI project managed with `uv`.
+- The GitHub repo is public:
+  - `https://github.com/kasperschnack/aulamat`
+  - remote: `git@github.com:kasperschnack/aulamat.git`
 - The maintained `aula` package is integrated.
-- MitID login now works from this repo.
+- MitID login works from this repo.
 - Token caching is implemented locally via `.aula_tokens.json`.
-- The CLI currently supports:
-  - `login`
-  - `profile`
-  - `threads`
-  - `messages <thread-id>`
-- Normalization models and fixture-backed tests exist.
+- Auth-cache inspection is implemented.
+- Native Aula message thread retrieval works.
+- Full message retrieval for a thread works.
+- Live Aula `content_html` message bodies are normalized.
+- Deterministic message triage is implemented.
+- OpenAI-based scheduled review is implemented.
+- The project now supports the intended scheduled workflow:
+  1. Read recent Aula message threads.
+  2. Fetch full messages for each thread.
+  3. Filter messages not seen in the previous run.
+  4. Run deterministic triage for transparent signals.
+  5. Ask OpenAI for a structured relevance decision and summary.
+  6. Store the checkpoint in `.aula_scan_state.json`.
+
+## CLI Commands
+
+Current CLI commands:
+
+- `login`
+- `auth-status`
+- `profile`
+- `threads`
+- `messages <thread-id>`
+- `important`
+- `review-new`
+
+Important command examples:
+
+```bash
+uv run aula-project auth-status
+uv run aula-project threads --limit 5
+uv run aula-project messages <thread-id>
+uv run aula-project important --thread-limit 10 --limit 5
+uv run aula-project review-new --thread-limit 20
+uv run aula-project review-new --thread-limit 20 --dry-run
+uv run aula-project review-new --thread-limit 20 --include-messages
+```
+
+`review-new` defaults to concise output:
+
+- counts
+- compact per-thread deterministic signal summaries
+- `openai_review`
+
+Use `--include-messages` only for debugging normalization or prompt inputs because the full payload is large.
+
+## Current Environment Variables
+
+See `.env.example`.
+
+- `AULA_MITID_USERNAME`
+- `AULA_AUTH_METHOD`
+- `AULA_TOKEN_CACHE_PATH`
+- `AULA_SCAN_STATE_PATH`
+- `AULA_RAW_CAPTURE_DIR`
+- `AULA_MESSAGE_LIMIT`
+- `AULA_JSON_INDENT`
+- `AULA_OPENAI_MODEL`
+- `OPENAI_API_KEY`
+
+Ignored local state:
+
+- `.env`
+- `.aula_tokens.json`
+- `.aula_scan_state.json`
+- `.aula_raw/`
+
+## Verified Behavior
+
+On April 29, 2026:
+
+- `auth-status` showed a reusable cached access token, refresh token, and session cookies.
+- `uv run pytest` passed after the scheduled-review changes.
+- The test suite covered normalization, deterministic triage, auth-cache inspection, and scheduled-review state handling.
+- A live `review-new --thread-limit 20` run completed end to end.
+- The live run returned a useful OpenAI review with:
+  - per-thread `flag`
+  - `priority`
+  - `reason`
+  - `recommended_action`
+  - short evidence snippets
+  - overall summary
+
+The live output was initially too verbose because it included full normalized messages by default. The code was then changed so `review-new` is concise by default and full messages require `--include-messages`.
 
 ## Confirmed Findings
 
-- The Aula message API path used by the old reference repo is still relevant.
-- These Aula methods are still the important ones for message access:
+- The Aula message API path used by the old reference repo remains relevant.
+- These Aula methods are still important for message access:
   - `profiles.getProfilesByLogin`
   - `messaging.getThreads`
   - `messaging.getMessagesForThread`
 - The old browser-scraping login flow should not be copied.
 - Authentication should continue to use the maintained `aula` package and MitID.
-- A local compatibility patch was added around the MitID completion handoff because the upstream flow did not fully match the current redirect/form behavior during testing.
+- A local compatibility patch exists around the MitID completion handoff because the upstream flow did not fully match the current redirect/form behavior during testing.
+- The maintained `aula` package handles key auth reuse paths:
+  - cached access-token reuse
+  - refresh-token renewal
+  - fresh MitID fallback when cached session cookies are rejected
+- Live thread metadata is sparse:
+  - titles may be present
+  - participants are often missing
+  - timestamps are often missing
+  - preview text may be missing
+- Because thread metadata is sparse, relevance ranking must inspect full thread messages.
+- Some live messages have no sender or sent timestamp in the maintained library output.
+- Message IDs from live payloads are usable as the scheduled checkpoint key.
 
-## New Priority
+## Message Scope
 
-The next pass is no longer just “can we log in?”.
+The current implementation reads native Aula messages.
 
-The next goals are:
+Meebook status:
 
-1. Make auth reuse dependable so the user does not need to complete MitID every time.
-2. Read Aula messages and identify what is important enough that the user should actually read it.
+- The normalizer can label a thread as `meebook` when Meebook appears inside native Aula message metadata.
+- The project does not yet fetch Meebook/provider widget data directly.
+- A live message mentioned that Meebook may be down and users can use the browser instead of the app.
+- Keep Meebook/provider integration separate from native Aula messaging until there is a concrete need and stable data source.
 
-## Auth Direction
+## Relevance Direction
 
-Treat token reuse as a product requirement, not a nice-to-have.
+The product goal is no longer only “urgent or required”.
 
-Focus on:
+The scheduled review should answer:
 
-- verifying when cached tokens are reused successfully
-- verifying when refresh tokens are sufficient
-- understanding when Aula session cookies expire
-- reducing fresh MitID prompts as much as possible without brittle hacks
+> Is there anything in new Aula messages that is relevant or interesting for a parent to notice?
 
-Prefer:
-
-- cached token reuse
-- refresh-token-based renewal
-- session re-initialization when possible
-
-Only add “keep alive” behavior if it is actually needed after measuring the cache/refresh behavior.
-Do not build a fake long-running session daemon unless it solves a real problem.
-
-## Message Triage Direction
-
-The user wants an agent to read Aula messages and figure out whether there is something important to read.
-
-Build this in stages:
-
-1. First, make message retrieval solid and normalized.
-2. Then add a deterministic triage layer that flags likely-important messages.
-3. Only after that, add an agent/LLM pass for summarization or prioritization.
-
-Important:
-
-- Keep raw Aula retrieval separate from interpretation.
-- Preserve raw payloads where useful for debugging.
-- Be explicit about what is a raw message fact versus an inferred importance judgment.
-
-Examples of likely-important signals:
+Relevant includes:
 
 - deadlines
+- payment or MobilePay requests
 - schedule changes
+- cancelled or moved trips
 - missing forms or consent
 - meetings
 - requests for response
 - absence / pickup / practical school logistics
-- sensitive or unread messages
+- things to bring
+- unread or sensitive messages
+- attachments
+- optional but interesting opportunities:
+  - extracurricular activities
+  - clubs and associations
+  - courses
+  - camps or holiday activities
+  - workshops
+  - webinars
+  - extracurricular/enrichment activities
 
-## Reference Context
+Priority guidance:
 
-This repo was started from a review of `https://github.com/A-Hoier/Aula-AI.d`.
+- Required action with deadline/payment/response should usually be `high`.
+- Concrete logistics for the child should usually be `medium`.
+- Optional opportunities are relevant but usually `low` unless they have a deadline, payment, or explicit action.
+- Generic FYI/newsletter content should not be flagged unless it contains a concrete action, logistics, or genuinely interesting opportunity.
 
-Useful parts of that repo:
+## Deterministic Signals
 
-- custom Aula client
-- proof that relevant message endpoints exist
+Currently implemented signal families include:
 
-Do not copy over:
+- `deadline`
+- `schedule_change`
+- `consent_or_form`
+- `response_requested`
+- `meeting`
+- `absence_or_pickup`
+- `practical_logistics`
+- `optional_opportunity`
+- `unread`
+- `sensitive`
+- `attachments`
 
-- FastAPI app
-- Dash frontend
-- agent scaffolding
-- general AI chat wrapper code
+The deterministic layer is not the final judge. It exists to provide transparent evidence and useful hints to OpenAI.
 
-A local inspection clone exists at:
+## OpenAI Review
 
-- `/tmp/Aula-AI.d-ref`
+OpenAI integration lives in `openai_review.py`.
+
+Scheduled prompt shaping lives in `scheduled_review.py`.
+
+The OpenAI review returns strict JSON with:
+
+- `items`
+  - `thread_id`
+  - `flag`
+  - `priority`
+  - `reason`
+  - `recommended_action`
+  - `evidence`
+- `summary`
+
+The current prompt tells OpenAI to:
+
+- flag required school logistics
+- flag optional opportunities like camps, clubs, workshops, webinars, and enrichment activities
+- keep optional opportunities lower priority unless there is deadline/payment/action
+- avoid flagging generic FYI content
+- use Danish message content as primary evidence
+- keep evidence snippets short
+
+## Auth Direction
+
+Treat token reuse as a product requirement.
+
+Focus on:
+
+- verifying cached token reuse
+- verifying refresh-token behavior
+- understanding when Aula session cookies expire
+- reducing fresh MitID prompts without brittle hacks
+
+Prefer:
+
+- cached token reuse
+- refresh-token renewal
+- session re-initialization when possible
+
+Do not build a fake long-running session daemon unless repeated scheduled usage proves it is needed.
+
+Current observability:
+
+- `login` reports the auth strategy used
+- `auth-status` inspects the local cache without hitting Aula
+- auth output is sanitized and should not expose raw tokens
 
 ## Constraints
 
 - Keep the project small and dependable.
 - Prefer CLI JSON output first.
 - Do not build a web UI yet.
-- Do not add broad agent infrastructure before the message pipeline is trustworthy.
+- Do not add broad agent infrastructure.
+- Keep raw Aula retrieval separate from interpretation.
+- Preserve raw payloads only where useful for debugging.
+- Keep native Aula messaging separate from provider-linked data such as Overblik or Meebook.
 - Keep tests fixture-backed where possible.
-- Keep native Aula messaging clearly separated from provider-linked data such as Overblik or Meebook.
+- Scheduled output should be concise by default.
 
 ## Immediate Next Steps
 
-1. Verify that `.aula_tokens.json` is reused across runs and document real behavior.
-2. Improve auth ergonomics if fresh MitID prompts still happen too often.
-3. Validate live `threads` and `messages` output against real Aula data.
-4. Tighten normalization using real payload structure.
-5. Add a first-pass importance classifier over normalized messages/threads.
-6. Add a CLI command that outputs “important things to read” as JSON.
-7. Only then evaluate whether an LLM/agent summarizer should be added on top.
+1. Run tests after the latest prompt/triage updates.
+2. Verify `review-new --dry-run` and `review-new --no-openai` still behave correctly.
+3. Add or update tests for `optional_opportunity` using broad category examples, not vendor-specific names.
+4. Inspect the compact `review-new` output after another live run.
+5. Consider adding a `--since` or `--reset-state` utility if scheduled testing needs easier checkpoint control.
+6. Consider adding notification delivery later, but only after the JSON review output is stable.
 
 ## Definition Of Done For The Next Pass
 
-- Repeated CLI runs usually reuse cached auth without requiring MitID every time.
-- `threads` and `messages` work reliably against live data.
-- The repo can identify likely-important Aula messages in a transparent way.
-- There is a CLI command that emits prioritized or flagged messages as JSON.
-- Tests cover normalization and the first-pass importance logic.
+- Tests pass.
+- `review-new` remains concise by default.
+- `--include-messages` still exposes full normalized payloads for debugging.
+- Optional opportunities are treated as relevant, usually low priority, without hard-coding one specific provider or activity name.
+- Required actions and practical school logistics remain higher priority than optional enrichment items.
+- Repeated scheduled runs do not reprocess already seen message IDs.
+- Auth reuse continues to avoid fresh MitID in normal use when cached/refresh tokens are valid.

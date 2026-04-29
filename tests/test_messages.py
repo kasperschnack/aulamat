@@ -30,3 +30,27 @@ def test_normalize_messages_supports_live_aula_content_html() -> None:
     assert messages[0].thread_id == "thread-live"
     assert messages[0].body_html == "<div>Svar senest i morgen kl. 14.</div>"
     assert messages[0].body_text == "Svar senest i morgen kl. 14."
+
+
+def test_normalize_messages_supports_nested_sender_and_attachment_containers() -> None:
+    messages = normalize_messages(
+        [
+            {
+                "messageKey": "live-msg-2",
+                "threadKey": "thread-live",
+                "sender": {"displayName": "Lærer Line"},
+                "created": "2026-04-29T08:15:00Z",
+                "content_html": "<p>Husk idrætstøj</p><p>Medbring madpakke.</p>",
+                "files": {"items": [{"fileId": "file-1", "fileName": "praktisk-info.pdf"}]},
+            }
+        ],
+        thread_id="fallback-thread",
+    )
+
+    assert messages[0].message_id == "live-msg-2"
+    assert messages[0].thread_id == "thread-live"
+    assert messages[0].sender_name == "Lærer Line"
+    assert messages[0].sent_at == "2026-04-29T08:15:00Z"
+    assert messages[0].body_text == "Husk idrætstøj Medbring madpakke."
+    assert messages[0].attachments[0].attachment_id == "file-1"
+    assert messages[0].attachments[0].filename == "praktisk-info.pdf"

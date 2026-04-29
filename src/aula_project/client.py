@@ -11,6 +11,9 @@ from aula_project.auth import authenticated_client, authenticated_session, inspe
 from aula_project.config import Settings
 from aula_project.models import AuthCacheStatus, AuthResult, MessageItem, MessageThread, Profile, ThreadAssessment
 from aula_project.normalize import normalize_messages, normalize_profile, normalize_threads
+from aula_project.openai_review import review_new_messages_with_openai
+from aula_project.scan_state import load_scan_state, save_scan_state, utc_now_iso
+from aula_project.scheduled_review import ScheduledReviewResult, build_new_thread_messages, mark_reviewed
 from aula_project.triage import assess_thread, rank_threads
 
 
@@ -110,3 +113,50 @@ class AulaDataClient:
         if result_limit is not None:
             return ranked[:result_limit]
         return ranked
+
+    async def review_new_messages(
+        self,
+        *,
+        thread_limit: int | None = None,
+        call_openai: bool = True,
+        update_state: bool = True,
+        save_raw: bool = False,
+    ) -> ScheduledReviewResult:
+        state = load_scan_state(self.settings.scan_state_path)
+        checked_at = utc_now_iso()
+        async with authenticated_session(self.settings) as session:
+            raw_threads = await session.client.get_message_threads()
+            self._save_raw("message-threads", raw_threads, enabled=save_raw)
+            threads = normalize_threads(raw_threads or [])
+            if thread_limit is not None:
+                threads = threads[:thread_limit]
+
+            messages_by_thread_id: dict[str, list[MessageItem]] = {}
+            for thread in threads:
+                raw_messages = await session.client.get_messages_for_thread(thread.thread_id)
+                self._save_raw(f"thread-{thread.thread_id}-messages", raw_messages, enabled=save_raw)
+                messages_by_thread_id[thread.thread_id] = normalize_messages(
+                    raw_messages or [],
+                    thread_id=thread.thread_id,
+                )
+
+        items = build_new_thread_messages(threads, messages_by_thread_id, state)
+        openai_review = None
+        if call_openai and items:
+            openai_review = review_new_messages_with_openai(items, model=self.settings.openai_model)
+
+        state_updated = False
+        if update_state:
+            next_state = mark_reviewed(state, items, checked_at=checked_at)
+            save_scan_state(self.settings.scan_state_path, next_state)
+            state_updated = True
+
+        return ScheduledReviewResult(
+            previous_last_checked_at=state.last_checked_at,
+            checked_at=checked_at,
+            new_thread_count=len(items),
+            new_message_count=sum(len(item.messages) for item in items),
+            items=items,
+            openai_review=openai_review,
+            state_updated=state_updated,
+        )

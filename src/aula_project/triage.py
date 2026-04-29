@@ -14,6 +14,7 @@ SIGNAL_RULES = (
             r"\bdeadline\b",
             r"\bfrist\b",
             r"\bsenest\b",
+            r"\binden\b",
             r"\btilmeld(?:ing)?\b",
             r"\baflever(?:ing|es)?\b",
         ),
@@ -28,6 +29,10 @@ SIGNAL_RULES = (
             r"\brykket\b",
             r"\bny tid\b",
             r"\bomlagt\b",
+            r"\bvikar\b",
+            r"\blukket\b",
+            r"\bmøder senere\b",
+            r"\bfri tidligere\b",
         ),
         "Schedule-change language",
     ),
@@ -51,6 +56,8 @@ SIGNAL_RULES = (
             r"\btilbagemelding\b",
             r"\bgiv besked\b",
             r"\bbesvar\b",
+            r"\bmeld tilbage\b",
+            r"\bkræver handling\b",
         ),
         "Response-request language",
     ),
@@ -74,20 +81,46 @@ SIGNAL_RULES = (
             r"\bhent(?:e|ning)\b",
             r"\bafhentning\b",
             r"\baflevering\b",
+            r"\blæge\b",
+            r"\btandlæge\b",
         ),
         "Absence or pickup logistics language",
     ),
     (
         "practical_logistics",
-        2,
+        3,
         (
             r"\bkontaktbog\b",
             r"\btur\b",
             r"\bpraktisk\b",
             r"\bmadpakke\b",
             r"\bpåmindelse\b",
+            r"\bhusk\b",
+            r"\bmedbring\b",
+            r"\bidrætstøj\b",
+            r"\bbetaling\b",
         ),
         "Practical school logistics language",
+    ),
+    (
+        "optional_opportunity",
+        2,
+        (
+            r"\btilbud\b",
+            r"\bfritidstilbud\b",
+            r"\bferiecamp\b",
+            r"\bsommerlejr\b",
+            r"\blejr\b",
+            r"\bklub\b",
+            r"\bforening\b",
+            r"\bkursus\b",
+            r"\bworkshop\b",
+            r"\bwebinar\b",
+            r"\baktivitet\b",
+            r"\barrangement\b",
+            r"\bgratis\b",
+        ),
+        "Optional child or parent opportunity language",
     ),
 )
 
@@ -121,6 +154,22 @@ def _importance_level(score: int) -> ImportanceLevel:
     return ImportanceLevel.LOW
 
 
+def _raw_bool(raw: dict[str, object], *names: str) -> bool:
+    for name in names:
+        value = raw.get(name)
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return value != 0
+        if isinstance(value, str):
+            lowered = value.strip().lower()
+            if lowered in {"1", "true", "yes", "y", "ja"}:
+                return True
+            if lowered in {"0", "false", "no", "n", "nej", ""}:
+                return False
+    return False
+
+
 def assess_thread(thread: MessageThread, messages: list[MessageItem]) -> ThreadAssessment:
     signals: list[ImportanceSignal] = []
     text_sources: list[tuple[str, str]] = []
@@ -138,6 +187,37 @@ def assess_thread(thread: MessageThread, messages: list[MessageItem]) -> ThreadA
 
     if thread.unread:
         signals.append(ImportanceSignal(signal="unread", weight=2, evidence="thread.unread is true"))
+
+    sensitive = _raw_bool(thread.raw, "sensitive", "isSensitive", "confidential", "isConfidential") or any(
+        _raw_bool(message.raw, "sensitive", "isSensitive", "confidential", "isConfidential") for message in messages
+    )
+    if sensitive:
+        signals.append(
+            ImportanceSignal(
+                signal="sensitive",
+                weight=3,
+                evidence="thread or message payload is marked sensitive/confidential",
+            )
+        )
+
+    requires_response = _raw_bool(
+        thread.raw,
+        "requiresResponse",
+        "responseRequired",
+        "answerRequired",
+        "requiresReply",
+    ) or any(
+        _raw_bool(message.raw, "requiresResponse", "responseRequired", "answerRequired", "requiresReply")
+        for message in messages
+    )
+    if requires_response and not any(signal.signal == "response_requested" for signal in signals):
+        signals.append(
+            ImportanceSignal(
+                signal="response_requested",
+                weight=3,
+                evidence="thread or message payload is marked as requiring a response",
+            )
+        )
 
     attachment_count = sum(len(message.attachments) for message in messages)
     if attachment_count:
@@ -158,6 +238,8 @@ def assess_thread(thread: MessageThread, messages: list[MessageItem]) -> ThreadA
         "attachment_count": attachment_count,
         "participants": thread.participants,
         "last_message_at": thread.last_message_at,
+        "sensitive": sensitive,
+        "requires_response": requires_response,
     }
     return ThreadAssessment(
         thread=thread,

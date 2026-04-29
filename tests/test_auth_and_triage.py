@@ -68,3 +68,66 @@ def test_rank_threads_filters_low_priority_threads() -> None:
     ranked = rank_threads([low, high])
 
     assert [assessment.thread.thread_id for assessment in ranked] == ["thread-1"]
+
+
+def test_assess_thread_uses_payload_response_and_sensitive_flags() -> None:
+    thread = normalize_threads(
+        [
+            {
+                "id": "thread-sensitive",
+                "subject": "Kort info",
+                "responseRequired": True,
+                "isSensitive": "true",
+            }
+        ]
+    )[0]
+    messages = normalize_messages(
+        [
+            {
+                "id": "msg-sensitive",
+                "content_html": "<p>Se venligst beskeden.</p>",
+            }
+        ],
+        thread_id=thread.thread_id,
+    )
+
+    assessment = assess_thread(thread, messages)
+
+    assert assessment.level is ImportanceLevel.HIGH
+    assert {signal.signal for signal in assessment.signals} >= {"response_requested", "sensitive"}
+    assert assessment.facts["requires_response"] is True
+    assert assessment.facts["sensitive"] is True
+
+
+def test_assess_thread_flags_practical_danish_school_language() -> None:
+    thread = normalize_threads(
+        [
+            {
+                "id": "thread-practical",
+                "subject": "Tur på fredag",
+                "latestMessageText": "Husk idrætstøj og medbring madpakke.",
+            }
+        ]
+    )[0]
+
+    assessment = assess_thread(thread, [])
+
+    assert assessment.level is ImportanceLevel.MEDIUM
+    assert {signal.signal for signal in assessment.signals} >= {"practical_logistics"}
+
+
+def test_assess_thread_flags_general_optional_opportunities() -> None:
+    thread = normalize_threads(
+        [
+            {
+                "id": "thread-opportunity",
+                "subject": "Fritidstilbud",
+                "latestMessageText": "Der er gratis workshop og kursus efter skole.",
+            }
+        ]
+    )[0]
+
+    assessment = assess_thread(thread, [])
+
+    assert assessment.level is ImportanceLevel.LOW
+    assert {signal.signal for signal in assessment.signals} >= {"optional_opportunity"}

@@ -31,3 +31,32 @@ def test_normalize_threads_infers_provider_and_unread_state() -> None:
     assert threads[0].unread is True
     assert threads[0].participants == ["Lærer Line", "Kasper Guardian"]
     assert threads[1].source is MessageSource.MEEBOOK
+
+
+def test_normalize_threads_supports_live_aliases_and_string_booleans() -> None:
+    threads = normalize_threads(
+        [
+            {
+                "threadKey": "live-thread-1",
+                "name": "Ændret afhentning",
+                "recipients": [{"fullName": "Lærer Line"}],
+                "lastMessageTimestamp": "2026-04-29T12:00:00Z",
+                "isUnread": "false",
+                "messagePreview": "Barnet skal hentes tidligere.",
+            },
+            {
+                "conversationId": "live-thread-2",
+                "subject": "Svar udbedes",
+                "hasUnreadMessages": "ja",
+            },
+        ]
+    )
+
+    assert threads[0].thread_id == "live-thread-1"
+    assert threads[0].title == "Ændret afhentning"
+    assert threads[0].participants == ["Lærer Line"]
+    assert threads[0].last_message_at == "2026-04-29T12:00:00Z"
+    assert threads[0].unread is False
+    assert threads[0].preview_text == "Barnet skal hentes tidligere."
+    assert threads[1].thread_id == "live-thread-2"
+    assert threads[1].unread is True

@@ -1,4 +1,4 @@
-# Aula Project
+# Aulamat
 
 Minimal Python CLI for authenticating to Aula, reading recent message threads, and normalizing message data into stable JSON.
 
@@ -14,6 +14,7 @@ uv run aula-project login
 uv run aula-project threads --limit 5
 uv run aula-project messages <thread-id>
 uv run aula-project important --thread-limit 10 --limit 5
+uv run aula-project review-new --thread-limit 20
 uv run aula-project profile
 ```
 
@@ -28,11 +29,16 @@ Token caching is local and defaults to `.aula_tokens.json`.
 
 `auth-status` inspects only the local token cache. `important` ranks likely-important threads using deterministic rules and includes the matched signals in its JSON output.
 
+`review-new` is intended for scheduled runs. It reads recent threads, expands them into full messages, filters messages received since the previous successful scan, asks OpenAI for a structured relevance decision, and stores its checkpoint in `.aula_scan_state.json`. Its default output is concise; use `--include-messages` for the full normalized message payload, or `--dry-run` to inspect candidates without calling OpenAI or updating the checkpoint.
+
 ## Environment
 
 - `AULA_MITID_USERNAME`: MitID username used for Aula login
 - `AULA_AUTH_METHOD`: `app` or `token`, defaults to `app`
 - `AULA_TOKEN_CACHE_PATH`: token cache file path, defaults to `.aula_tokens.json`
+- `AULA_SCAN_STATE_PATH`: scheduled scan checkpoint path, defaults to `.aula_scan_state.json`
 - `AULA_RAW_CAPTURE_DIR`: optional directory for saved raw payloads
 - `AULA_MESSAGE_LIMIT`: default thread listing limit, defaults to `10`
 - `AULA_JSON_INDENT`: JSON indentation, defaults to `2`
+- `AULA_OPENAI_MODEL`: OpenAI model used by `review-new`, defaults to `gpt-5.2`
+- `OPENAI_API_KEY`: OpenAI API key used by the official SDK

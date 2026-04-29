@@ -14,10 +14,12 @@ DEFAULT_ENV_FILE = ".env"
 class Settings:
     mitid_username: str
     token_cache_path: Path
+    scan_state_path: Path
     raw_capture_dir: Path | None
     auth_method: str = "app"
     default_limit: int = 10
     json_indent: int = 2
+    openai_model: str = "gpt-5.2"
 
 
 def _resolve_path(value: str | None, default: str) -> Path:
@@ -43,8 +45,10 @@ def load_settings(
     return Settings(
         mitid_username=mitid_username,
         token_cache_path=_resolve_path(os.getenv("AULA_TOKEN_CACHE_PATH"), ".aula_tokens.json"),
+        scan_state_path=_resolve_path(os.getenv("AULA_SCAN_STATE_PATH"), ".aula_scan_state.json"),
         raw_capture_dir=raw_capture_dir,
         auth_method=os.getenv("AULA_AUTH_METHOD", "app").strip().lower() or "app",
         default_limit=int(os.getenv("AULA_MESSAGE_LIMIT", "10")),
         json_indent=int(os.getenv("AULA_JSON_INDENT", "2")),
+        openai_model=os.getenv("AULA_OPENAI_MODEL", "gpt-5.2").strip() or "gpt-5.2",
     )
