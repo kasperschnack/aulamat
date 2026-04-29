@@ -14,7 +14,6 @@ uv run aula-project login
 uv run aula-project threads --limit 5
 uv run aula-project messages <thread-id>
 uv run aula-project important --thread-limit 10 --limit 5
-uv run aula-project review-new --thread-limit 20
 uv run aula-project profile
 ```
 
@@ -29,7 +28,40 @@ Token caching is local and defaults to `.aula_tokens.json`.
 
 `auth-status` inspects only the local token cache. `important` ranks likely-important threads using deterministic rules and includes the matched signals in its JSON output.
 
-`review-new` is intended for scheduled runs. It reads recent threads, expands them into full messages, filters messages received since the previous successful scan, asks OpenAI for a structured relevance decision, and stores its checkpoint in `.aula_scan_state.json`. Its default output is concise; use `--include-messages` for the full normalized message payload, or `--dry-run` to inspect candidates without calling OpenAI or updating the checkpoint.
+## Scheduled Review
+
+`review-new` is intended for scheduled runs. It reads recent threads, expands them into full messages, filters messages received since the previous successful scan, asks OpenAI for a structured relevance decision, and stores its checkpoint in `.aula_scan_state.json`.
+
+For automation or downstream processing, use the default compact JSON:
+
+```bash
+uv run aula-project review-new --thread-limit 20
+uv run aula-project review-new --thread-limit 20 --format json
+```
+
+For a user-facing notification body, use plain text:
+
+```bash
+uv run aula-project review-new --thread-limit 20 --format text
+```
+
+For debugging normalization, prompt input, or model decisions, use verbose JSON:
+
+```bash
+uv run aula-project review-new --thread-limit 20 --format json-verbose
+```
+
+Output modes:
+
+- `--format json`: compact machine-readable JSON, default
+- `--format json-verbose`: full normalized messages for debugging
+- `--format text`: end-user summary text only
+
+Use `--dry-run` to inspect candidates without calling OpenAI or updating the checkpoint:
+
+```bash
+uv run aula-project review-new --thread-limit 20 --dry-run
+```
 
 ## Environment
 

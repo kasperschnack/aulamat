@@ -87,6 +87,20 @@ class ScheduledReviewResult:
             ]
         return payload
 
+    def to_text(self) -> str:
+        if self.openai_review:
+            summary = self.openai_review.get("summary")
+            if isinstance(summary, str) and summary.strip():
+                return summary.strip()
+
+        if self.new_message_count == 0:
+            return "Ingen nye Aula-beskeder siden sidste gennemgang."
+
+        return (
+            f"Der er {self.new_message_count} nye Aula-beskeder fordelt på "
+            f"{self.new_thread_count} tråde. Kør med JSON-output for detaljer."
+        )
+
 
 def _parse_timestamp(value: str | None) -> datetime | None:
     if not value:

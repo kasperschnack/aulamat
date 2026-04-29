@@ -88,7 +88,13 @@ def _build_parser() -> argparse.ArgumentParser:
     review_new_parser.add_argument(
         "--include-messages",
         action="store_true",
-        help="Include full normalized messages in the JSON output for debugging.",
+        help="Deprecated alias for --format json-verbose.",
+    )
+    review_new_parser.add_argument(
+        "--format",
+        choices=("json", "json-verbose", "text"),
+        default="json",
+        help="Output format: compact JSON, verbose JSON with normalized messages, or plain summary text.",
     )
     review_new_parser.set_defaults(command="review-new")
 
@@ -178,13 +184,18 @@ async def _run_async(args: argparse.Namespace) -> int:
 
     if args.command == "review-new":
         thread_limit = args.thread_limit if args.thread_limit is not None else settings.default_limit
+        output_format = "json-verbose" if args.include_messages else args.format
         result = await client.review_new_messages(
             thread_limit=thread_limit,
             call_openai=not args.dry_run and not args.no_openai,
             update_state=not args.dry_run and not args.no_update_state,
             save_raw=args.save_raw,
         )
-        payload = result.to_dict(include_messages=args.include_messages)
+        if output_format == "text":
+            print(result.to_text())
+            return 0
+
+        payload = result.to_dict(include_messages=output_format == "json-verbose")
         payload["thread_limit"] = thread_limit
         payload["openai_model"] = settings.openai_model
         _render(payload, indent=settings.json_indent)

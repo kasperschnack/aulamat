@@ -112,3 +112,26 @@ def test_scheduled_review_result_can_omit_full_messages() -> None:
     assert compact["items"][0]["thread_id"] == "thread-1"
     assert compact["items"][0]["new_message_count"] == 1
     assert "messages" not in compact["items"][0]
+
+
+def test_scheduled_review_result_text_prefers_openai_summary() -> None:
+    result = ScheduledReviewResult(
+        previous_last_checked_at=None,
+        checked_at="2026-04-29T12:00:00Z",
+        new_thread_count=2,
+        new_message_count=3,
+        openai_review={"summary": "Husk madpakke og svar på invitationen."},
+    )
+
+    assert result.to_text() == "Husk madpakke og svar på invitationen."
+
+
+def test_scheduled_review_result_text_handles_no_new_messages() -> None:
+    result = ScheduledReviewResult(
+        previous_last_checked_at="2026-04-29T11:00:00Z",
+        checked_at="2026-04-29T12:00:00Z",
+        new_thread_count=0,
+        new_message_count=0,
+    )
+
+    assert result.to_text() == "Ingen nye Aula-beskeder siden sidste gennemgang."
