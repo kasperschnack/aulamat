@@ -108,6 +108,7 @@ SIGNAL_RULES = (
         (
             r"\btilbud\b",
             r"\bfritidstilbud\b",
+            r"\w*camp\b",
             r"\bferiecamp\b",
             r"\bsommerlejr\b",
             r"\blejr\b",
@@ -119,6 +120,10 @@ SIGNAL_RULES = (
             r"\baktivitet\b",
             r"\barrangement\b",
             r"\bgratis\b",
+            r"\bkodning\b",
+            r"\bprogrammering\b",
+            r"\bcoding\b",
+            r"\bmaker(?:space)?\b",
         ),
         "Optional child or parent opportunity language",
     ),

@@ -12,7 +12,7 @@ from aula_project.config import Settings
 from aula_project.models import AuthCacheStatus, AuthResult, MessageItem, MessageThread, Profile, ThreadAssessment
 from aula_project.normalize import normalize_messages, normalize_profile, normalize_threads
 from aula_project.openai_review import review_new_messages_with_openai
-from aula_project.scan_state import load_scan_state, save_scan_state, utc_now_iso
+from aula_project.scan_state import ScanState, load_scan_state, save_scan_state, utc_now_iso
 from aula_project.scheduled_review import ScheduledReviewResult, build_new_thread_messages, mark_reviewed
 from aula_project.triage import assess_thread, rank_threads
 
@@ -25,6 +25,27 @@ def _json_default(value: Any) -> Any:
 
 def _serialize_json(value: Any) -> str:
     return json.dumps(value, indent=2, ensure_ascii=False, default=_json_default)
+
+
+def _validate_since_timestamp(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = value.strip()
+    if not normalized:
+        return None
+    candidate = f"{normalized[:-1]}+00:00" if normalized.endswith("Z") else normalized
+    try:
+        datetime.fromisoformat(candidate)
+    except ValueError as exc:
+        raise ValueError(f"--since must be an ISO timestamp, got {value!r}") from exc
+    return normalized
+
+
+def _review_state_for_since(state: ScanState, since: str | None) -> ScanState:
+    since = _validate_since_timestamp(since)
+    if since is None:
+        return state
+    return ScanState(last_checked_at=since, seen_message_ids=set())
 
 
 @dataclass(slots=True)
@@ -118,11 +139,13 @@ class AulaDataClient:
         self,
         *,
         thread_limit: int | None = None,
+        since: str | None = None,
         call_openai: bool = True,
         update_state: bool = True,
         save_raw: bool = False,
     ) -> ScheduledReviewResult:
         state = load_scan_state(self.settings.scan_state_path)
+        review_state = _review_state_for_since(state, since)
         checked_at = utc_now_iso()
         async with authenticated_session(self.settings) as session:
             raw_threads = await session.client.get_message_threads()
@@ -140,7 +163,7 @@ class AulaDataClient:
                     thread_id=thread.thread_id,
                 )
 
-        items = build_new_thread_messages(threads, messages_by_thread_id, state)
+        items = build_new_thread_messages(threads, messages_by_thread_id, review_state)
         openai_review = None
         if call_openai and items:
             openai_review = review_new_messages_with_openai(items, model=self.settings.openai_model)
@@ -152,7 +175,7 @@ class AulaDataClient:
             state_updated = True
 
         return ScheduledReviewResult(
-            previous_last_checked_at=state.last_checked_at,
+            previous_last_checked_at=review_state.last_checked_at,
             checked_at=checked_at,
             new_thread_count=len(items),
             new_message_count=sum(len(item.messages) for item in items),

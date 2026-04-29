@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import pytest
+
+from aula_project.client import _review_state_for_since, _validate_since_timestamp
 from aula_project.models import MessageSource, MessageThread
 from aula_project.normalize import normalize_messages
 from aula_project.scan_state import ScanState
@@ -50,6 +53,39 @@ def test_build_new_thread_messages_filters_by_checkpoint_and_seen_ids() -> None:
     assert len(items) == 1
     assert [message.message_id for message in items[0].messages] == ["new-msg"]
     assert items[0].deterministic_assessment.score >= 3
+
+
+def test_review_state_for_since_replays_seen_messages_after_timestamp() -> None:
+    thread = MessageThread(thread_id="thread-1", source=MessageSource.AULA)
+    messages = normalize_messages(
+        [
+            {
+                "id": "seen-but-in-window",
+                "threadId": "thread-1",
+                "sentAt": "2026-04-29T10:05:00Z",
+                "messageText": "Husk madpakke.",
+            }
+        ],
+        thread_id="thread-1",
+    )
+    saved_state = ScanState(
+        last_checked_at="2026-04-29T11:00:00Z",
+        seen_message_ids={"seen-but-in-window"},
+    )
+
+    items = build_new_thread_messages(
+        [thread],
+        {"thread-1": messages},
+        _review_state_for_since(saved_state, "2026-04-29T10:00:00Z"),
+    )
+
+    assert [message.message_id for message in items[0].messages] == ["seen-but-in-window"]
+
+
+def test_validate_since_timestamp_rejects_invalid_values() -> None:
+    assert _validate_since_timestamp("2026-04-29T10:00:00Z") == "2026-04-29T10:00:00Z"
+    with pytest.raises(ValueError, match="--since must be an ISO timestamp"):
+        _validate_since_timestamp("yesterday")
 
 
 def test_mark_reviewed_updates_checkpoint_and_seen_ids() -> None:

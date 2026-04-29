@@ -71,6 +71,11 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     review_new_parser.add_argument("--thread-limit", type=int, default=None)
     review_new_parser.add_argument(
+        "--since",
+        default=None,
+        help="Review messages after this ISO timestamp, ignoring the saved checkpoint for selection.",
+    )
+    review_new_parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Collect new messages without calling OpenAI or updating scan state.",
@@ -187,6 +192,7 @@ async def _run_async(args: argparse.Namespace) -> int:
         output_format = "json-verbose" if args.include_messages else args.format
         result = await client.review_new_messages(
             thread_limit=thread_limit,
+            since=args.since,
             call_openai=not args.dry_run and not args.no_openai,
             update_state=not args.dry_run and not args.no_update_state,
             save_raw=args.save_raw,

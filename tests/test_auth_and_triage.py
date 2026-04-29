@@ -131,3 +131,20 @@ def test_assess_thread_flags_general_optional_opportunities() -> None:
 
     assert assessment.level is ImportanceLevel.LOW
     assert {signal.signal for signal in assessment.signals} >= {"optional_opportunity"}
+
+
+def test_assess_thread_flags_optional_camps_without_vendor_specific_rule() -> None:
+    thread = normalize_threads(
+        [
+            {
+                "id": "thread-camp",
+                "subject": "MakerCamp i sommerferien",
+                "latestMessageText": "Børn kan prøve kodning og kreative teknologier.",
+            }
+        ]
+    )[0]
+
+    assessment = assess_thread(thread, [])
+
+    assert assessment.level is ImportanceLevel.LOW
+    assert {signal.signal for signal in assessment.signals} >= {"optional_opportunity"}
