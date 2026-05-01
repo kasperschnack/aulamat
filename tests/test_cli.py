@@ -2,8 +2,23 @@ from __future__ import annotations
 
 import pytest
 
-from aula_project.cli import _auth_status_summary, _build_parser, _format_auth_status_text, _with_timeout
-from aula_project.models import AuthCacheStatus
+from aula_project.cli import (
+    _auth_status_summary,
+    _build_parser,
+    _format_auth_status_text,
+    _format_important_text,
+    _format_messages_text,
+    _format_threads_text,
+    _with_timeout,
+)
+from aula_project.models import (
+    AuthCacheStatus,
+    ImportanceLevel,
+    MessageItem,
+    MessageSource,
+    MessageThread,
+    ThreadAssessment,
+)
 
 
 def test_review_and_notify_accept_command_timeout_option() -> None:
@@ -14,6 +29,67 @@ def test_review_and_notify_accept_command_timeout_option() -> None:
 
     assert review_args.command_timeout_seconds == 20
     assert notify_args.command_timeout_seconds == 15
+
+
+def test_review_new_defaults_to_text_but_accepts_json_flag() -> None:
+    parser = _build_parser()
+
+    default_args = parser.parse_args(["review-new"])
+    json_args = parser.parse_args(["review-new", "--json"])
+
+    assert default_args.format == "text"
+    assert json_args.json is True
+
+
+def test_threads_text_is_clean_and_omits_raw_json() -> None:
+    thread = MessageThread(
+        thread_id="163184660",
+        source=MessageSource.AULA,
+        title="glemt liggeunderlags pose til\nfødselsdag",
+        raw={"thread_id": 163184660, "subject": "glemt liggeunderlags pose til fødselsdag"},
+    )
+
+    text = _format_threads_text([thread])
+
+    assert text == (
+        "Aula threads (1):\n"
+        "- glemt liggeunderlags pose til fødselsdag\n"
+        "  ID: 163184660"
+    )
+    assert "raw" not in text
+    assert "{" not in text
+
+
+def test_messages_text_shows_sender_preview_and_attachments() -> None:
+    message = MessageItem(
+        message_id="msg-1",
+        thread_id="thread-1",
+        source=MessageSource.AULA,
+        sender_name="Lærer Line",
+        sent_at="2026-04-29T08:15:00Z",
+        body_text="Husk idrætstøj og madpakke.",
+    )
+
+    text = _format_messages_text("thread-1", [message])
+
+    assert text == (
+        "Aula messages in thread thread-1 (1):\n"
+        "- Lærer Line | 2026-04-29T08:15:00Z\n"
+        "  Husk idrætstøj og madpakke."
+    )
+
+
+def test_important_text_summarizes_assessments() -> None:
+    thread = MessageThread(thread_id="thread-1", source=MessageSource.AULA, title="Tur i morgen")
+    assessment = ThreadAssessment(thread=thread, level=ImportanceLevel.MEDIUM, score=5)
+
+    text = _format_important_text([assessment])
+
+    assert text == (
+        "Important Aula threads (1):\n"
+        "- Medium: Tur i morgen\n"
+        "  ID: thread-1 | Score: 5"
+    )
 
 
 def test_auth_status_summary_reports_logged_in_when_access_token_reusable() -> None:
@@ -91,6 +167,7 @@ def test_auth_status_summary_reports_refresh_available_for_expired_access_token(
     assert summary["status"] == "refresh_available"
     assert summary["logged_in"] is True
     assert "refresh token is available" in summary["message"]
+    assert "expired or expiring soon" in summary["message"]
 
 
 def test_auth_status_text_reports_login_required_without_cache() -> None:

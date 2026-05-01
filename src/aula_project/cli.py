@@ -9,6 +9,12 @@ from typing import Any
 
 from aula_project.client import AulaDataClient
 from aula_project.config import DEFAULT_ENV_FILE, load_settings
+from aula_project.models import (
+    MessageItem,
+    MessageThread,
+    Profile,
+    ThreadAssessment,
+)
 from aula_project.notifications import AppriseNotifier, build_notification_plan, send_notification
 from aula_project.scan_state import load_scan_state, save_scan_state
 from aula_project.scheduled_review import mark_reviewed
@@ -46,10 +52,12 @@ def _build_parser() -> argparse.ArgumentParser:
 
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    profile_parser = subparsers.add_parser("profile", help="Print current Aula profile context as JSON.")
+    profile_parser = subparsers.add_parser("profile", help="Print current Aula profile context.")
+    profile_parser.add_argument("--json", action="store_true", help="Print full normalized profile as JSON.")
     profile_parser.set_defaults(command="profile")
 
     login_parser = subparsers.add_parser("login", help="Authenticate and initialize the Aula session.")
+    login_parser.add_argument("--json", action="store_true", help="Print login result as JSON.")
     login_parser.set_defaults(command="login")
 
     auth_status_parser = subparsers.add_parser(
@@ -68,12 +76,14 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     auth_status_parser.set_defaults(command="auth-status")
 
-    threads_parser = subparsers.add_parser("threads", help="List recent message threads as JSON.")
+    threads_parser = subparsers.add_parser("threads", help="List recent message threads.")
     threads_parser.add_argument("--limit", type=int, default=None)
+    threads_parser.add_argument("--json", action="store_true", help="Print normalized threads as JSON.")
     threads_parser.set_defaults(command="threads")
 
-    messages_parser = subparsers.add_parser("messages", help="Fetch full messages for one thread as JSON.")
+    messages_parser = subparsers.add_parser("messages", help="Fetch full messages for one thread.")
     messages_parser.add_argument("thread_id")
+    messages_parser.add_argument("--json", action="store_true", help="Print normalized messages as JSON.")
     messages_parser.set_defaults(command="messages")
 
     important_parser = subparsers.add_parser(
@@ -83,6 +93,7 @@ def _build_parser() -> argparse.ArgumentParser:
     important_parser.add_argument("--thread-limit", type=int, default=None)
     important_parser.add_argument("--limit", type=int, default=None)
     important_parser.add_argument("--include-low", action="store_true")
+    important_parser.add_argument("--json", action="store_true", help="Print ranked threads as JSON.")
     important_parser.set_defaults(command="important")
 
     review_new_parser = subparsers.add_parser(
@@ -118,8 +129,13 @@ def _build_parser() -> argparse.ArgumentParser:
     review_new_parser.add_argument(
         "--format",
         choices=("json", "json-verbose", "text"),
-        default="json",
+        default="text",
         help="Output format: compact JSON, verbose JSON with normalized messages, or plain summary text.",
+    )
+    review_new_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Print compact JSON. Equivalent to --format json.",
     )
     review_new_parser.add_argument(
         "--timeout-seconds",
@@ -173,6 +189,7 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Overall timeout for this notification run. Use 0 to disable.",
     )
+    notify_new_parser.add_argument("--json", action="store_true", help="Print review and notification plan as JSON.")
     notify_new_parser.set_defaults(command="notify-new")
 
     return parser
@@ -180,6 +197,117 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def _render(payload: Any, *, indent: int) -> None:
     print(json.dumps(payload, indent=indent, ensure_ascii=False, default=_json_default))
+
+
+def _single_line(value: str | None) -> str:
+    if not value:
+        return ""
+    return " ".join(value.split())
+
+
+def _truncate(value: str, max_length: int) -> str:
+    if len(value) <= max_length:
+        return value
+    return value[: max_length - 3].rstrip() + "..."
+
+
+def _format_profile_text(profile: Profile) -> str:
+    name = profile.display_name or "(unknown name)"
+    lines = [f"Logged in as {name}", f"Profile ID: {profile.profile_id}"]
+    if profile.role:
+        lines.append(f"Role: {profile.role}")
+    if profile.children:
+        lines.append("Children:")
+        for child in profile.children:
+            child_name = child.display_name or child.child_id
+            institution = f" ({child.institution_name})" if child.institution_name else ""
+            lines.append(f"- {child_name}{institution}")
+    return "\n".join(lines)
+
+
+def _format_threads_text(threads: list[MessageThread]) -> str:
+    if not threads:
+        return "No Aula threads found."
+
+    lines = [f"Aula threads ({len(threads)}):"]
+    for thread in threads:
+        title = _truncate(_single_line(thread.title) or "(no subject)", 80)
+        unread = " unread" if thread.unread else ""
+        lines.append(f"- {title}{unread}")
+        details = [f"ID: {thread.thread_id}"]
+        if thread.last_message_at:
+            details.append(f"Last: {thread.last_message_at}")
+        if thread.participants:
+            details.append("Participants: " + ", ".join(thread.participants[:3]))
+        if thread.preview_text:
+            details.append("Preview: " + _truncate(_single_line(thread.preview_text), 90))
+        lines.append(f"  {' | '.join(details)}")
+    return "\n".join(lines)
+
+
+def _format_messages_text(thread_id: str, messages: list[MessageItem]) -> str:
+    if not messages:
+        return f"No Aula messages found for thread {thread_id}."
+
+    lines = [f"Aula messages in thread {thread_id} ({len(messages)}):"]
+    for message in messages:
+        sender = message.sender_name or "Unknown sender"
+        sent_at = f" | {message.sent_at}" if message.sent_at else ""
+        lines.append(f"- {sender}{sent_at}")
+        preview = _single_line(message.body_text)
+        if preview:
+            lines.append(f"  {_truncate(preview, 140)}")
+        if message.attachments:
+            filenames = [
+                attachment.filename or attachment.attachment_id
+                for attachment in message.attachments[:3]
+            ]
+            extra = f" (+{len(message.attachments) - 3} more)" if len(message.attachments) > 3 else ""
+            lines.append(f"  Attachments: {', '.join(filenames)}{extra}")
+    return "\n".join(lines)
+
+
+def _format_important_text(assessments: list[ThreadAssessment]) -> str:
+    if not assessments:
+        return "No important Aula threads found."
+
+    lines = [f"Important Aula threads ({len(assessments)}):"]
+    for assessment in assessments:
+        thread = assessment.thread
+        level = assessment.level.value
+        title = _truncate(_single_line(thread.title) or "(no subject)", 80)
+        lines.append(f"- {level.capitalize()}: {title}")
+        details = [f"ID: {thread.thread_id}", f"Score: {assessment.score}"]
+        if assessment.signals:
+            details.append(
+                "Signals: "
+                + ", ".join(signal.signal.replace("_", " ") for signal in assessment.signals[:4])
+            )
+        lines.append(f"  {' | '.join(details)}")
+    return "\n".join(lines)
+
+
+def _format_notify_text(payload: dict[str, Any]) -> str:
+    notification = payload["notification"]
+    plan = notification["plan"]
+    if not plan["should_notify"]:
+        return "No notification needed."
+
+    title = plan["title"]
+    body = plan["body"]
+    if notification["sent"]:
+        status = "Notification sent."
+    elif notification["attempted"]:
+        status = "Notification failed."
+    else:
+        status = "Notification not sent."
+
+    lines = [status, title]
+    if body:
+        lines.append(body)
+    if notification["error"]:
+        lines.append(f"Error: {notification['error']}")
+    return "\n".join(lines)
 
 
 def _configure_logging(verbosity: int) -> None:
@@ -230,7 +358,7 @@ def _auth_status_summary(status: Any) -> dict[str, Any]:
         return {
             "status": "refresh_available",
             "logged_in": True,
-            "message": "Access token is expired, but a refresh token is available. The next Aula command should refresh the login automatically.",
+            "message": "Access token is expired or expiring soon, but a refresh token is available. The next Aula command should refresh the login automatically.",
             "access_token_expires_at": status.access_token_expires_at,
             "access_token_expires_at_local": status.access_token_expires_at_local,
             "local_timezone": status.local_timezone,
@@ -308,7 +436,10 @@ async def _run_async(args: argparse.Namespace) -> int:
             "profile_id": profile.profile_id,
             "display_name": profile.display_name,
         }
-        _render(payload, indent=settings.json_indent)
+        if args.json or args.verbose:
+            _render(payload, indent=settings.json_indent)
+        else:
+            print(_format_profile_text(profile))
         return 0
 
     if args.command == "auth-status":
@@ -327,7 +458,10 @@ async def _run_async(args: argparse.Namespace) -> int:
             timeout_seconds=settings.request_timeout_seconds,
             operation="Fetching Aula profile",
         )
-        _render(profile.to_dict(), indent=settings.json_indent)
+        if args.json or args.verbose:
+            _render(profile.to_dict(), indent=settings.json_indent)
+        else:
+            print(_format_profile_text(profile))
         return 0
 
     if args.command == "threads":
@@ -337,7 +471,10 @@ async def _run_async(args: argparse.Namespace) -> int:
             timeout_seconds=settings.request_timeout_seconds,
             operation="Fetching Aula threads",
         )
-        _render([thread.to_dict() for thread in threads], indent=settings.json_indent)
+        if args.json or args.verbose:
+            _render([thread.to_dict() for thread in threads], indent=settings.json_indent)
+        else:
+            print(_format_threads_text(threads))
         return 0
 
     if args.command == "messages":
@@ -350,7 +487,10 @@ async def _run_async(args: argparse.Namespace) -> int:
             "thread_id": args.thread_id,
             "messages": [message.to_dict() for message in messages],
         }
-        _render(payload, indent=settings.json_indent)
+        if args.json or args.verbose:
+            _render(payload, indent=settings.json_indent)
+        else:
+            print(_format_messages_text(args.thread_id, messages))
         return 0
 
     if args.command == "important":
@@ -369,12 +509,19 @@ async def _run_async(args: argparse.Namespace) -> int:
             "thread_limit": thread_limit,
             "items": [assessment.to_dict() for assessment in assessments],
         }
-        _render(payload, indent=settings.json_indent)
+        if args.json or args.verbose:
+            _render(payload, indent=settings.json_indent)
+        else:
+            print(_format_important_text(assessments))
         return 0
 
     if args.command == "review-new":
         thread_limit = args.thread_limit if args.thread_limit is not None else settings.default_limit
-        output_format = "json-verbose" if args.include_messages else args.format
+        output_format = "json" if args.json else args.format
+        if args.include_messages:
+            output_format = "json-verbose"
+        if args.verbose and output_format == "text":
+            output_format = "json-verbose"
         result = await _with_timeout(
             client.review_new_messages(
                 thread_limit=thread_limit,
@@ -448,7 +595,10 @@ async def _run_async(args: argparse.Namespace) -> int:
         payload["thread_limit"] = thread_limit
         payload["openai_model"] = settings.openai_model
         payload["notification"] = notification_result
-        _render(payload, indent=settings.json_indent)
+        if args.json or args.verbose:
+            _render(payload, indent=settings.json_indent)
+        else:
+            print(_format_notify_text(payload))
         notification_failed = bool(notification_result["error"]) or (
             notification_result["attempted"] and not notification_result["sent"]
         )
