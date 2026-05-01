@@ -54,6 +54,19 @@ def _format_epoch(value: Any) -> str | None:
         return None
 
 
+def _format_epoch_local(value: Any) -> str | None:
+    if value is None:
+        return None
+    try:
+        return datetime.fromtimestamp(float(value)).astimezone().isoformat(timespec="seconds")
+    except (TypeError, ValueError, OSError):
+        return None
+
+
+def _local_timezone_name() -> str:
+    return datetime.now().astimezone().tzname() or "local"
+
+
 def inspect_token_cache(token_cache_path: Path) -> AuthCacheStatus:
     if not token_cache_path.exists():
         return AuthCacheStatus(cache_path=str(token_cache_path), cache_exists=False)
@@ -91,6 +104,8 @@ def inspect_token_cache(token_cache_path: Path) -> AuthCacheStatus:
         cache_exists=True,
         cached_at=str(raw_data.get("created_at")) if raw_data.get("created_at") else None,
         access_token_expires_at=_format_epoch(expires_at),
+        access_token_expires_at_local=_format_epoch_local(expires_at),
+        local_timezone=_local_timezone_name(),
         access_token_valid_for_seconds=valid_for_seconds,
         access_token_reusable=reusable,
         refresh_token_present=bool(isinstance(tokens, dict) and tokens.get("refresh_token")),

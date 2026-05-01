@@ -94,6 +94,8 @@ class AuthCacheStatus(JsonModel):
     cache_exists: bool
     cached_at: str | None = None
     access_token_expires_at: str | None = None
+    access_token_expires_at_local: str | None = None
+    local_timezone: str | None = None
     access_token_valid_for_seconds: int | None = None
     access_token_reusable: bool = False
     refresh_token_present: bool = False

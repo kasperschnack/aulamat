@@ -10,6 +10,27 @@ from aula_project.scan_state import ScanState, utc_now_iso
 from aula_project.triage import assess_thread
 
 
+LEVEL_LABELS = {
+    "high": "Høj",
+    "medium": "Mellem",
+    "low": "Lav",
+}
+
+SIGNAL_LABELS = {
+    "deadline": "frist",
+    "schedule_change": "ændring",
+    "consent_or_form": "samtykke/formular",
+    "response_requested": "svar ønsket",
+    "meeting": "møde",
+    "absence_or_pickup": "fravær/afhentning",
+    "practical_logistics": "praktik",
+    "optional_opportunity": "tilbud/aktivitet",
+    "unread": "ulæst",
+    "sensitive": "følsom",
+    "attachments": "bilag",
+}
+
+
 @dataclass(slots=True)
 class NewThreadMessages:
     thread: MessageThread
@@ -96,10 +117,80 @@ class ScheduledReviewResult:
         if self.new_message_count == 0:
             return "Ingen nye Aula-beskeder siden sidste gennemgang."
 
-        return (
-            f"Der er {self.new_message_count} nye Aula-beskeder fordelt på "
-            f"{self.new_thread_count} tråde. Kør med JSON-output for detaljer."
-        )
+        message_noun = "ny Aula-besked" if self.new_message_count == 1 else "nye Aula-beskeder"
+        thread_noun = "tråd" if self.new_thread_count == 1 else "tråde"
+        lines = [f"{self.new_message_count} {message_noun} i {self.new_thread_count} {thread_noun}:"]
+        lines.extend(_format_text_item(item) for item in _rank_text_items(self.items)[:5])
+        if len(self.items) > 5:
+            lines.append(f"- Og {len(self.items) - 5} flere tråde.")
+        return "\n".join(lines)
+
+
+def _rank_text_items(items: list[NewThreadMessages]) -> list[NewThreadMessages]:
+    level_rank = {"high": 3, "medium": 2, "low": 1}
+    return sorted(
+        items,
+        key=lambda item: (
+            level_rank.get(item.deterministic_assessment.level.value, 0),
+            item.deterministic_assessment.score,
+            item.thread.last_message_at or "",
+        ),
+        reverse=True,
+    )
+
+
+def _format_text_item(item: NewThreadMessages) -> str:
+    assessment = item.deterministic_assessment
+    level = LEVEL_LABELS.get(assessment.level.value, assessment.level.value)
+    title = _truncate(_single_line(item.thread.title) or "(uden titel)", 60)
+    preview = _truncate(_message_preview(item), 120)
+    signals = _signal_summary(item)
+
+    parts = [f"- {level}: {title}"]
+    if preview:
+        parts.append(f"- {preview}")
+    if signals:
+        parts.append(f"({signals})")
+    return " ".join(parts)
+
+
+def _message_preview(item: NewThreadMessages) -> str:
+    for message in item.messages:
+        text = _single_line(message.body_text)
+        if text:
+            return text
+
+    filenames = [
+        attachment.filename
+        for message in item.messages
+        for attachment in message.attachments
+        if attachment.filename
+    ]
+    if filenames:
+        return "Bilag: " + ", ".join(filenames[:3])
+    return ""
+
+
+def _signal_summary(item: NewThreadMessages) -> str:
+    labels = [
+        SIGNAL_LABELS.get(signal.signal, signal.signal.replace("_", " "))
+        for signal in item.deterministic_assessment.signals[:3]
+    ]
+    if not labels:
+        return ""
+    return "signaler: " + ", ".join(labels)
+
+
+def _single_line(value: str | None) -> str:
+    if not value:
+        return ""
+    return " ".join(value.split())
+
+
+def _truncate(value: str, max_length: int) -> str:
+    if len(value) <= max_length:
+        return value
+    return value[: max_length - 3].rstrip() + "..."
 
 
 def _parse_timestamp(value: str | None) -> datetime | None:

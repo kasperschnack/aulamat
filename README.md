@@ -15,6 +15,7 @@ uv run aula-project threads --limit 5
 uv run aula-project messages <thread-id>
 uv run aula-project important --thread-limit 10 --limit 5
 uv run aula-project profile
+uv run aula-project notify-new --thread-limit 20 --dry-run
 ```
 
 Token caching is local and defaults to `.aula_tokens.json`.
@@ -26,7 +27,9 @@ Token caching is local and defaults to `.aula_tokens.json`.
 - `fresh_login`
 - `fresh_login_after_cookie_rejection`
 
-`auth-status` inspects only the local token cache. `important` ranks likely-important threads using deterministic rules and includes the matched signals in its JSON output.
+`auth-status` inspects only the local token cache and prints whether cached login can be reused, refreshed, or needs a new login. Use `auth-status --verbose` for sanitized token and cookie diagnostics. `important` ranks likely-important threads using deterministic rules and includes the matched signals in its JSON output.
+
+Default human-readable output is intentionally concise. When timestamps are shown in text, they use local time only. Use JSON or verbose output when you need UTC timestamps, raw-ish normalized fields, or diagnostics.
 
 ## Scheduled Review
 
@@ -63,6 +66,34 @@ Use `--dry-run` to inspect candidates without calling OpenAI or updating the che
 uv run aula-project review-new --thread-limit 20 --dry-run
 ```
 
+## Notifications
+
+`notify-new` runs the scheduled review flow and sends a notification only when something meets the configured minimum priority. It uses OpenAI decisions when enabled, and falls back to deterministic triage with `--no-openai` or `--dry-run`.
+
+Configure an Apprise notification URL in `.env`:
+
+```env
+AULA_NOTIFY_URL=pover://USER_KEY@APP_TOKEN
+AULA_NOTIFY_MIN_PRIORITY=medium
+```
+
+Then run:
+
+```bash
+uv run aula-project notify-new --thread-limit 20
+```
+
+Useful variants:
+
+```bash
+uv run aula-project notify-new --thread-limit 20 --dry-run
+uv run aula-project notify-new --thread-limit 20 --no-openai
+uv run aula-project notify-new --thread-limit 20 --min-priority high
+uv run aula-project notify-new --thread-limit 20 --dry-run --timeout-seconds 20
+```
+
+`AULA_NOTIFY_URL` accepts any Apprise-supported URL, such as Pushover, ntfy, Telegram, email, Slack, or Discord. Use `AULA_NOTIFY_URLS` with whitespace-separated URLs to notify more than one destination.
+
 ## Environment
 
 - `AULA_MITID_USERNAME`: MitID username used for Aula login
@@ -73,4 +104,8 @@ uv run aula-project review-new --thread-limit 20 --dry-run
 - `AULA_MESSAGE_LIMIT`: default thread listing limit, defaults to `10`
 - `AULA_JSON_INDENT`: JSON indentation, defaults to `2`
 - `AULA_OPENAI_MODEL`: OpenAI model used by `review-new`, defaults to `gpt-5.2`
+- `AULA_NOTIFY_URL`: Apprise notification URL used by `notify-new`
+- `AULA_NOTIFY_URLS`: whitespace-separated Apprise notification URLs, alternative to `AULA_NOTIFY_URL`
+- `AULA_NOTIFY_MIN_PRIORITY`: `low`, `medium`, or `high`, defaults to `medium`
+- `AULA_REQUEST_TIMEOUT_SECONDS`: overall timeout for Aula network commands, defaults to `60`; set to `0` to disable
 - `OPENAI_API_KEY`: OpenAI API key used by the official SDK

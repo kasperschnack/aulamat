@@ -171,3 +171,61 @@ def test_scheduled_review_result_text_handles_no_new_messages() -> None:
     )
 
     assert result.to_text() == "Ingen nye Aula-beskeder siden sidste gennemgang."
+
+
+def test_scheduled_review_result_text_summarizes_deterministic_items_without_openai() -> None:
+    trip_thread = MessageThread(
+        thread_id="thread-1",
+        source=MessageSource.AULA,
+        title="Tur på fredag",
+        last_message_at="2026-04-29T10:00:00Z",
+    )
+    gym_thread = MessageThread(
+        thread_id="thread-2",
+        source=MessageSource.AULA,
+        title="Idræt",
+        last_message_at="2026-04-29T09:00:00Z",
+    )
+    messages_by_thread_id = {
+        "thread-1": normalize_messages(
+            [
+                {
+                    "id": "msg-1",
+                    "threadId": "thread-1",
+                    "sentAt": "2026-04-29T10:00:00Z",
+                    "messageText": "Svar senest fredag om jeres barn deltager.",
+                }
+            ],
+            thread_id="thread-1",
+        ),
+        "thread-2": normalize_messages(
+            [
+                {
+                    "id": "msg-2",
+                    "threadId": "thread-2",
+                    "sentAt": "2026-04-29T09:00:00Z",
+                    "messageText": "Husk idrætstøj og drikkedunk.",
+                }
+            ],
+            thread_id="thread-2",
+        ),
+    }
+    items = build_new_thread_messages(
+        [trip_thread, gym_thread],
+        messages_by_thread_id,
+        ScanState(),
+    )
+    result = ScheduledReviewResult(
+        previous_last_checked_at=None,
+        checked_at="2026-04-29T12:00:00Z",
+        new_thread_count=2,
+        new_message_count=2,
+        items=items,
+    )
+
+    assert result.to_text() == (
+        "2 nye Aula-beskeder i 2 tråde:\n"
+        "- Høj: Tur på fredag - Svar senest fredag om jeres barn deltager. "
+        "(signaler: frist, svar ønsket, praktik)\n"
+        "- Mellem: Idræt - Husk idrætstøj og drikkedunk. (signaler: praktik)"
+    )

@@ -27,6 +27,9 @@ def test_inspect_token_cache_reports_reusable_token(monkeypatch, tmp_path: Path)
     assert status.access_token_reusable is True
     assert status.refresh_token_present is True
     assert status.access_token_valid_for_seconds == 3600
+    assert status.access_token_expires_at == "2023-11-14T23:13:20Z"
+    assert status.access_token_expires_at_local is not None
+    assert status.local_timezone
     assert status.session_cookie_names == ["SimpleSAML", "AUTH_SESSION_ID", "KEYCLOAK_SESSION"]
 
 
