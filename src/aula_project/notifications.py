@@ -1,9 +1,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import shutil
+import subprocess
 from typing import Any, Protocol
 
-from aula_project.scheduled_review import NewThreadMessages, ScheduledReviewResult
+from aula_project.scheduled_review import (
+    LEVEL_LABELS,
+    SIGNAL_LABELS,
+    NewThreadMessages,
+    ScheduledReviewResult,
+)
 
 
 PRIORITY_RANK = {
@@ -72,6 +79,35 @@ class AppriseNotifier:
         return bool(notifier.notify(title=title, body=body))
 
 
+class TerminalNotifier:
+    def __init__(self, executable: str | None = None) -> None:
+        resolved = executable or shutil.which("terminal-notifier")
+        if not resolved:
+            raise ValueError("terminal-notifier was not found on PATH.")
+        self.executable = resolved
+
+    @classmethod
+    def available(cls) -> bool:
+        return shutil.which("terminal-notifier") is not None
+
+    def notify(self, *, title: str, body: str) -> bool:
+        result = subprocess.run(
+            [
+                self.executable,
+                "-title",
+                title,
+                "-message",
+                body,
+                "-group",
+                "aula-project",
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        return result.returncode == 0
+
+
 def build_notification_plan(
     result: ScheduledReviewResult,
     *,
@@ -119,7 +155,7 @@ def _build_plan(
     return NotificationPlan(
         should_notify=should_notify,
         title=_notification_title(actionable_count),
-        body=result.to_text() if should_notify else "Ingen vigtige nye Aula-beskeder.",
+        body=_notification_body(result) if should_notify else "Ingen vigtige nye Aula-beskeder.",
         actionable_count=actionable_count,
         min_priority=min_priority,
         source=source,
@@ -174,6 +210,77 @@ def _filtered_result(
         openai_review=result.openai_review,
         state_updated=result.state_updated,
     )
+
+
+def _notification_body(result: ScheduledReviewResult) -> str:
+    if result.openai_review:
+        summary = result.openai_review.get("summary")
+        if isinstance(summary, str) and summary.strip() and not result.items:
+            return summary.strip()
+
+    message_noun = "ny Aula-besked" if result.new_message_count == 1 else "nye Aula-beskeder"
+    thread_noun = "tråd" if result.new_thread_count == 1 else "tråde"
+    lines = []
+    if result.openai_review:
+        summary = result.openai_review.get("summary")
+        if isinstance(summary, str) and summary.strip():
+            lines.extend([summary.strip(), ""])
+    lines.append(f"{result.new_message_count} {message_noun} i {result.new_thread_count} {thread_noun}:")
+    for index, item in enumerate(_rank_notification_items(result.items), start=1):
+        if index > 1:
+            lines.append("")
+        lines.extend(_format_notification_item(item))
+    return "\n".join(lines)
+
+
+def _rank_notification_items(items: list[NewThreadMessages]) -> list[NewThreadMessages]:
+    level_rank = {"high": 3, "medium": 2, "low": 1}
+    return sorted(
+        items,
+        key=lambda item: (
+            level_rank.get(item.deterministic_assessment.level.value, 0),
+            item.deterministic_assessment.score,
+            item.thread.last_message_at or "",
+        ),
+        reverse=True,
+    )
+
+
+def _format_notification_item(item: NewThreadMessages) -> list[str]:
+    assessment = item.deterministic_assessment
+    level = LEVEL_LABELS.get(assessment.level.value, assessment.level.value)
+    title = _single_line(item.thread.title) or "(uden titel)"
+    lines = [f"- {level}: {title}"]
+    signals = _signal_summary(item)
+    if signals:
+        lines.append(f"  {signals}")
+    for message in item.messages:
+        sender = _single_line(message.sender_name) or "Ukendt afsender"
+        sent_at = f" | {message.sent_at}" if message.sent_at else ""
+        lines.append(f"  Fra: {sender}{sent_at}")
+        body = _single_line(message.body_text)
+        if body:
+            lines.append(f"  {body}")
+        filenames = [attachment.filename for attachment in message.attachments if attachment.filename]
+        if filenames:
+            lines.append("  Bilag: " + ", ".join(filenames))
+    return lines
+
+
+def _signal_summary(item: NewThreadMessages) -> str:
+    labels = [
+        SIGNAL_LABELS.get(signal.signal, signal.signal.replace("_", " "))
+        for signal in item.deterministic_assessment.signals[:3]
+    ]
+    if not labels:
+        return ""
+    return "Signaler: " + ", ".join(labels)
+
+
+def _single_line(value: str | None) -> str:
+    if not value:
+        return ""
+    return " ".join(value.split())
 
 
 def _notification_title(actionable_count: int) -> str:

@@ -17,7 +17,7 @@ from aula_project.models import AuthCacheStatus, AuthResult
 
 
 LOGGER = logging.getLogger(__name__)
-TOKEN_EXPIRY_BUFFER_SECS = 60
+TOKEN_EXPIRY_BUFFER_SECS = 30 * 60
 SESSION_COOKIE_NAMES = (
     "SimpleSAML",
     "SimpleSAMLAuthToken",
@@ -43,6 +43,17 @@ def _load_aula_auth() -> tuple[type[Any], Any, Any, type[Exception]]:
         ) from exc
 
     return FileTokenStorage, authenticate, create_client, AulaAuthenticationError
+
+
+def _configure_aula_auth_refresh_buffer() -> None:
+    try:
+        import aula.auth_flow as auth_flow
+    except ImportError:  # pragma: no cover - handled by _load_aula_auth
+        return
+
+    current_buffer = getattr(auth_flow, "_TOKEN_EXPIRY_BUFFER_SECS", None)
+    if isinstance(current_buffer, int) and current_buffer < TOKEN_EXPIRY_BUFFER_SECS:
+        auth_flow._TOKEN_EXPIRY_BUFFER_SECS = TOKEN_EXPIRY_BUFFER_SECS
 
 
 def _format_epoch(value: Any) -> str | None:
@@ -273,6 +284,7 @@ async def _prompt_password() -> str:
 @asynccontextmanager
 async def authenticated_session(settings: Settings):
     file_token_storage, authenticate, create_client, aula_auth_error = _load_aula_auth()
+    _configure_aula_auth_refresh_buffer()
     _install_mitid_step4_compat_patch()
     settings.token_cache_path.parent.mkdir(parents=True, exist_ok=True)
     token_storage = file_token_storage(str(settings.token_cache_path))

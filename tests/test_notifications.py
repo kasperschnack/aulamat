@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from aula_project.models import MessageSource, MessageThread
 from aula_project.normalize import normalize_messages
-from aula_project.notifications import build_notification_plan, send_notification
+from aula_project.notifications import TerminalNotifier, build_notification_plan, send_notification
 from aula_project.scan_state import ScanState
 from aula_project.scheduled_review import ScheduledReviewResult, build_new_thread_messages
 
@@ -64,7 +64,8 @@ def test_notification_plan_uses_openai_flagged_priority() -> None:
     assert plan.should_notify is True
     assert plan.actionable_count == 1
     assert plan.source == "openai"
-    assert plan.body == "Svar på turbeskeden."
+    assert "Svar på turbeskeden." in plan.body
+    assert "Generel orientering." in plan.body
 
 
 def test_notification_plan_suppresses_openai_low_priority() -> None:
@@ -100,6 +101,20 @@ def test_notification_plan_falls_back_to_deterministic_priority() -> None:
     assert "Tur på fredag" in plan.body
 
 
+def test_notification_plan_includes_full_actionable_message_text() -> None:
+    message_text = (
+        "Svar senest fredag om jeres barn deltager. "
+        "Dette er en længere besked med praktiske detaljer, som ikke skal forkortes i notifikationsvisningen."
+    )
+    result = _review_result(message_text)
+
+    plan = build_notification_plan(result, min_priority="medium")
+
+    assert message_text in plan.body
+    assert "Fra: Ukendt afsender" in plan.body
+    assert "..." not in plan.body
+
+
 def test_send_notification_skips_when_plan_is_not_actionable() -> None:
     result = _review_result("Generel orientering.")
     plan = build_notification_plan(result, min_priority="high")
@@ -122,3 +137,12 @@ def test_send_notification_records_delivery_result() -> None:
     assert notification_result.attempted is True
     assert notification_result.sent is True
     assert notifier.calls == [(plan.title, plan.body)]
+
+
+def test_terminal_notifier_reports_availability_from_path(monkeypatch) -> None:
+    monkeypatch.setattr("aula_project.notifications.shutil.which", lambda name: "/usr/local/bin/terminal-notifier")
+
+    notifier = TerminalNotifier()
+
+    assert TerminalNotifier.available() is True
+    assert notifier.executable == "/usr/local/bin/terminal-notifier"

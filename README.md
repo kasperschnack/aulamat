@@ -16,6 +16,7 @@ uv run aula-project messages <thread-id>
 uv run aula-project important --thread-limit 10 --limit 5
 uv run aula-project profile
 uv run aula-project notify-new --thread-limit 20 --dry-run
+uv run aula-project summary-server
 ```
 
 Token caching is local and defaults to `.aula_tokens.json`.
@@ -93,6 +94,33 @@ uv run aula-project notify-new --thread-limit 20 --dry-run --timeout-seconds 20
 ```
 
 `AULA_NOTIFY_URL` accepts any Apprise-supported URL, such as Pushover, ntfy, Telegram, email, Slack, or Discord. Use `AULA_NOTIFY_URLS` with whitespace-separated URLs to notify more than one destination.
+
+If no Apprise URL is configured, `notify-new` will use `terminal-notifier` when it is available on `PATH`:
+
+```bash
+brew install terminal-notifier
+uv run aula-project notify-new --thread-limit 20
+```
+
+Install a macOS launchd job that checks every 20 minutes:
+
+```bash
+uv run aula-project install-service --interval-minutes 20 --thread-limit 20 --load
+```
+
+The service runs `notify-new`, so it refreshes the Aula token when needed, checks for important new messages, sends a notification only when something meets the configured priority, and updates `.aula_scan_state.json` after successful delivery or when no notification is needed.
+
+## Summary Server
+
+Run a local summary page:
+
+```bash
+uv run aula-project summary-server --thread-limit 20 --limit 10
+```
+
+Then open `http://127.0.0.1:8765/`. JSON is available at `http://127.0.0.1:8765/api/summary`.
+
+The current implementation reads the Aula profile, message threads, and full messages for those threads. It does not yet fetch calendar events, absence records, documents, galleries, Meebook plans beyond message-thread payloads, or other Aula modules.
 
 ## Environment
 

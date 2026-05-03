@@ -4,6 +4,8 @@ import argparse
 import asyncio
 import json
 import logging
+from pathlib import Path
+import subprocess
 import sys
 from typing import Any
 
@@ -15,9 +17,11 @@ from aula_project.models import (
     Profile,
     ThreadAssessment,
 )
-from aula_project.notifications import AppriseNotifier, build_notification_plan, send_notification
+from aula_project.notifications import AppriseNotifier, TerminalNotifier, build_notification_plan, send_notification
 from aula_project.scan_state import load_scan_state, save_scan_state
 from aula_project.scheduled_review import mark_reviewed
+from aula_project.service import build_launchd_service, launchd_plist, write_launchd_plist
+from aula_project.summary_server import run_summary_server
 
 
 def _json_default(value: Any) -> Any:
@@ -192,6 +196,30 @@ def _build_parser() -> argparse.ArgumentParser:
     notify_new_parser.add_argument("--json", action="store_true", help="Print review and notification plan as JSON.")
     notify_new_parser.set_defaults(command="notify-new")
 
+    install_service_parser = subparsers.add_parser(
+        "install-service",
+        help="Install a macOS launchd job that runs notify-new on an interval.",
+    )
+    install_service_parser.add_argument("--interval-minutes", type=int, default=20)
+    install_service_parser.add_argument("--thread-limit", type=int, default=None)
+    install_service_parser.add_argument("--min-priority", choices=("low", "medium", "high"), default=None)
+    install_service_parser.add_argument("--no-openai", action="store_true")
+    install_service_parser.add_argument("--label", default="dk.local.aula-project.notify")
+    install_service_parser.add_argument("--plist-dir", default=None)
+    install_service_parser.add_argument("--load", action="store_true", help="Load the launchd job after writing it.")
+    install_service_parser.add_argument("--json", action="store_true", help="Print installed service details as JSON.")
+    install_service_parser.set_defaults(command="install-service")
+
+    summary_server_parser = subparsers.add_parser(
+        "summary-server",
+        help="Serve a local Aula summary page and JSON endpoint.",
+    )
+    summary_server_parser.add_argument("--host", default="127.0.0.1")
+    summary_server_parser.add_argument("--port", type=int, default=8765)
+    summary_server_parser.add_argument("--thread-limit", type=int, default=None)
+    summary_server_parser.add_argument("--limit", type=int, default=10)
+    summary_server_parser.set_defaults(command="summary-server")
+
     return parser
 
 
@@ -310,6 +338,35 @@ def _format_notify_text(payload: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _notification_backend_text(notify_urls: list[str]) -> str:
+    if notify_urls:
+        return "Apprise"
+    if TerminalNotifier.available():
+        return "terminal-notifier"
+    return "none"
+
+
+def _build_notifier(notify_urls: list[str]) -> Any:
+    if notify_urls:
+        return AppriseNotifier(notify_urls)
+    return TerminalNotifier()
+
+
+def _format_service_text(payload: dict[str, Any]) -> str:
+    lines = [
+        "Installed Aula notification service.",
+        f"Label: {payload['label']}",
+        f"Plist: {payload['plist_path']}",
+        f"Interval: {payload['interval_minutes']}m",
+        "Command: " + " ".join(payload["command"]),
+    ]
+    if payload.get("loaded"):
+        lines.append("Launchd job loaded.")
+    elif payload.get("load_error"):
+        lines.append(f"Launchd load failed: {payload['load_error']}")
+    return "\n".join(lines)
+
+
 def _configure_logging(verbosity: int) -> None:
     level = logging.ERROR
     if verbosity == 1:
@@ -418,7 +475,7 @@ async def _with_timeout(awaitable: Any, *, timeout_seconds: float, operation: st
 
 async def _run_async(args: argparse.Namespace) -> int:
     _configure_logging(args.verbose)
-    settings = load_settings(args.env_file, require_username=args.command != "auth-status")
+    settings = load_settings(args.env_file, require_username=args.command not in {"auth-status", "install-service"})
     if args.auth_method is not None:
         settings.auth_method = args.auth_method
     timeout_override = getattr(args, "command_timeout_seconds", None)
@@ -573,13 +630,15 @@ async def _run_async(args: argparse.Namespace) -> int:
             notify_urls = [args.notify_url.strip()] if args.notify_url and args.notify_url.strip() else settings.notify_urls
             if plan.should_notify:
                 if notify_urls:
-                    notification_result = send_notification(plan, AppriseNotifier(notify_urls)).to_dict()
+                    notification_result = send_notification(plan, _build_notifier(notify_urls)).to_dict()
+                elif TerminalNotifier.available():
+                    notification_result = send_notification(plan, _build_notifier([])).to_dict()
                 else:
                     notification_result = {
                         "plan": plan.to_dict(),
                         "attempted": False,
                         "sent": False,
-                        "error": "Missing notification URL. Set AULA_NOTIFY_URL or AULA_NOTIFY_URLS.",
+                        "error": "No notifier is available. Install terminal-notifier or set AULA_NOTIFY_URL/AULA_NOTIFY_URLS.",
                     }
             else:
                 notification_result = send_notification(plan, _NoopNotifier()).to_dict()
@@ -594,6 +653,9 @@ async def _run_async(args: argparse.Namespace) -> int:
         payload = result.to_dict(include_messages=False)
         payload["thread_limit"] = thread_limit
         payload["openai_model"] = settings.openai_model
+        payload["notification_backend"] = _notification_backend_text(
+            [args.notify_url.strip()] if args.notify_url and args.notify_url.strip() else settings.notify_urls
+        )
         payload["notification"] = notification_result
         if args.json or args.verbose:
             _render(payload, indent=settings.json_indent)
@@ -603,6 +665,48 @@ async def _run_async(args: argparse.Namespace) -> int:
             notification_result["attempted"] and not notification_result["sent"]
         )
         return 2 if notification_failed else 0
+
+    if args.command == "install-service":
+        service = build_launchd_service(
+            project_dir=Path.cwd(),
+            interval_minutes=args.interval_minutes,
+            thread_limit=args.thread_limit,
+            min_priority=args.min_priority,
+            no_openai=args.no_openai,
+            label=args.label,
+            plist_dir=Path(args.plist_dir).expanduser() if args.plist_dir else None,
+        )
+        write_launchd_plist(service, project_dir=Path.cwd())
+        payload = service.to_dict()
+        payload["plist"] = launchd_plist(service, project_dir=Path.cwd())
+        payload["loaded"] = False
+        payload["load_error"] = None
+        if args.load:
+            result = subprocess.run(
+                ["launchctl", "load", str(service.plist_path)],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            payload["loaded"] = result.returncode == 0
+            payload["load_error"] = result.stderr.strip() or result.stdout.strip() or None
+        if args.json or args.verbose:
+            _render(payload, indent=settings.json_indent)
+        else:
+            print(_format_service_text(payload))
+        return 0 if not payload["load_error"] else 2
+
+    if args.command == "summary-server":
+        thread_limit = args.thread_limit if args.thread_limit is not None else settings.default_limit
+        print(f"Serving Aula summary on http://{args.host}:{args.port}")
+        run_summary_server(
+            settings,
+            host=args.host,
+            port=args.port,
+            thread_limit=thread_limit,
+            result_limit=args.limit,
+        )
+        return 0
 
     raise RuntimeError(f"Unknown command: {args.command}")
 

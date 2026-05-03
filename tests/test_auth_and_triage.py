@@ -45,6 +45,20 @@ def test_inspect_token_cache_marks_expired_access_token(monkeypatch, tmp_path: P
     assert status.access_token_valid_for_seconds == -100
 
 
+def test_inspect_token_cache_treats_soon_expiring_access_token_as_refresh_candidate(
+    monkeypatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr("aula_project.auth.time.time", lambda: 1700002640.0)
+    cache_path = tmp_path / "tokens.json"
+    cache_path.write_text((FIXTURES_DIR / "auth_cache.json").read_text(encoding="utf-8"), encoding="utf-8")
+
+    status = inspect_token_cache(cache_path)
+
+    assert status.access_token_reusable is False
+    assert status.refresh_token_present is True
+    assert status.access_token_valid_for_seconds == 960
+
+
 def test_assess_thread_flags_meeting_and_unread_signals() -> None:
     thread = normalize_threads(_load_fixture("message_threads.json"))[0]
     messages = normalize_messages(_load_fixture("thread_messages_thread-1.json"), thread_id=thread.thread_id)
