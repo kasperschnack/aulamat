@@ -89,7 +89,11 @@ def test_summary_html_renders_important_threads() -> None:
             "profile": {"display_name": "Kasper"},
             "important_threads": [
                 {
-                    "thread": {"thread_id": "thread-1", "title": "Tur på fredag"},
+                    "thread": {
+                        "thread_id": "thread-1",
+                        "title": "Tur på fredag",
+                        "last_message_at": "2026-05-01T07:30:00Z",
+                    },
                     "level": "medium",
                     "score": 5,
                     "signals": [{"signal": "response_requested"}],
@@ -108,6 +112,8 @@ def test_summary_html_renders_important_threads() -> None:
 
     assert "Aula Summary" in html
     assert "Tur på fredag" in html
+    assert "2026-05-01 07:30" in html
+    assert 'class="thread-time"' in html
     assert '<details class="message-full-text">' in html
     assert "<summary>Full text</summary>" in html
     assert "Husk madpakke og regntøj." in html

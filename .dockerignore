@@ -5,6 +5,7 @@
 .aula_service*.log
 .aula_tokens.json
 .env
+data/
 .git/
 .mypy_cache/
 .pytest_cache/

@@ -27,7 +27,9 @@ def build_summary_shell_html() -> str:
     table { width: 100%; border-collapse: collapse; }
     th, td { border-bottom: 1px solid #d9e2ec; padding: 0.65rem; text-align: left; vertical-align: top; }
     th { color: #334e68; font-size: 0.85rem; text-transform: uppercase; }
+    .thread-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap; }
     .thread-title { font-weight: 700; }
+    .thread-time { color: #52606d; font-size: 0.85rem; white-space: nowrap; }
     .message { margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid #edf2f7; }
     .message-meta { color: #52606d; font-size: 0.85rem; margin-bottom: 0.25rem; }
     .message-preview { line-height: 1.45; }
@@ -64,6 +66,19 @@ def build_summary_shell_html() -> str:
       return text.length <= limit ? text : `${text.slice(0, limit - 1).trimEnd()}...`;
     };
 
+    const formatDateTime = (value) => {
+      if (!value) return "";
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return String(value);
+      return new Intl.DateTimeFormat(undefined, {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      }).format(date);
+    };
+
     const render = (payload) => {
       const profile = payload.profile || {};
       const profileName = profile.display_name || profile.profile_id || "Unavailable";
@@ -72,6 +87,7 @@ def build_summary_shell_html() -> str:
       const important = payload.important_threads || [];
       const rows = important.map((item) => {
         const thread = item.thread || {};
+        const threadTime = formatDateTime(thread.last_message_at);
         const level = String(item.level || "low");
         const signals = (item.signals || []).slice(0, 4).map((signal) => String(signal.signal || "").replaceAll("_", " ")).join(", ");
         const messages = (item.messages || []).map((message) => {
@@ -81,7 +97,8 @@ def build_summary_shell_html() -> str:
           const preview = truncate(bodyText.replace(/\\s+/g, " ").trim(), 180);
           return `<div class="message"><div class="message-meta">${escapeHtml(message.sender_name || "Unknown sender")}${message.sent_at ? ` - ${escapeHtml(message.sent_at)}` : ""}</div><div class="message-preview">${escapeHtml(preview)}</div><details class="message-full-text"><summary>Full text</summary><div class="message-body">${escapeHtml(bodyText)}</div></details>${attachmentHtml}</div>`;
         }).join("");
-        return `<tr><td class="level-${escapeHtml(level)}">${escapeHtml(level.charAt(0).toUpperCase() + level.slice(1))}</td><td><div class="thread-title">${escapeHtml(thread.title || "(no subject)")}</div><small>${escapeHtml(thread.thread_id)}</small>${messages}</td><td>${escapeHtml(item.score || 0)}</td><td>${escapeHtml(signals)}</td></tr>`;
+        const timeHtml = threadTime ? `<span class="thread-time">${escapeHtml(threadTime)}</span>` : "";
+        return `<tr><td class="level-${escapeHtml(level)}">${escapeHtml(level.charAt(0).toUpperCase() + level.slice(1))}</td><td><div class="thread-heading"><div class="thread-title">${escapeHtml(thread.title || "(no subject)")}</div>${timeHtml}</div><small>${escapeHtml(thread.thread_id)}</small>${messages}</td><td>${escapeHtml(item.score || 0)}</td><td>${escapeHtml(signals)}</td></tr>`;
       }).join("");
       document.getElementById("rows").innerHTML = rows || '<tr><td colspan="4">No important Aula threads found.</td></tr>';
     };
@@ -130,7 +147,9 @@ def build_summary_html(payload: dict[str, Any]) -> str:
     table {{ width: 100%; border-collapse: collapse; }}
     th, td {{ border-bottom: 1px solid #d9e2ec; padding: 0.65rem; text-align: left; vertical-align: top; }}
     th {{ color: #334e68; font-size: 0.85rem; text-transform: uppercase; }}
+    .thread-heading {{ display: flex; align-items: baseline; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap; }}
     .thread-title {{ font-weight: 700; }}
+    .thread-time {{ color: #52606d; font-size: 0.85rem; white-space: nowrap; }}
     .message {{ margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid #edf2f7; }}
     .message-meta {{ color: #52606d; font-size: 0.85rem; margin-bottom: 0.25rem; }}
     .message-preview {{ line-height: 1.45; }}
@@ -233,10 +252,13 @@ def _important_row(item: dict[str, Any]) -> str:
     level = str(item["level"])
     signals = ", ".join(signal["signal"].replace("_", " ") for signal in item.get("signals", [])[:4])
     messages = "".join(_message_block(message) for message in item.get("messages", []))
+    thread_time = _format_display_datetime(thread.get("last_message_at"))
+    thread_time_html = f'<span class="thread-time">{escape(thread_time)}</span>' if thread_time else ""
     return (
         "<tr>"
         f'<td class="level-{escape(level)}">{escape(level.title())}</td>'
-        f'<td><div class="thread-title">{escape(str(thread.get("title") or "(no subject)"))}</div>'
+        f'<td><div class="thread-heading"><div class="thread-title">{escape(str(thread.get("title") or "(no subject)"))}</div>'
+        f"{thread_time_html}</div>"
         f"<small>{escape(str(thread.get('thread_id')))}</small>{messages}</td>"
         f"<td>{escape(str(item.get('score', 0)))}</td>"
         f"<td>{escape(signals)}</td>"
@@ -274,6 +296,20 @@ def _truncate_single_line(value: str, limit: int) -> str:
     if len(text) <= limit:
         return text
     return text[: limit - 1].rstrip() + "..."
+
+
+def _format_display_datetime(value: Any) -> str:
+    if not value:
+        return ""
+    text = str(value)
+    try:
+        from datetime import datetime
+
+        normalized = text[:-1] + "+00:00" if text.endswith("Z") else text
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        return text
+    return parsed.strftime("%Y-%m-%d %H:%M")
 
 
 def _auth_summary(status: Any) -> dict[str, Any]:

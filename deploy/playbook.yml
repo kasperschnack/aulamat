@@ -1,0 +1,182 @@
+---
+- name: Deploy Aulamat summary server
+  hosts: aula_servers
+  become: true
+
+  vars:
+    aula_app_dir: /opt/aula
+    aula_data_dir: /opt/aula/data
+    aula_service_name: aula-summary
+    aula_bind_address: 0.0.0.0
+    aula_port: 8767
+    aula_thread_limit: 20
+    aula_summary_limit: 10
+    aula_notify_enabled: false
+    aula_notify_interval_minutes: 20
+    aula_notify_thread_limit: 20
+    aula_message_limit: 10
+    aula_json_indent: 2
+    aula_auth_method: app
+    aula_openai_model: gpt-5.2
+    aula_notify_min_priority: medium
+    aula_request_timeout_seconds: 60
+    aula_mitid_username: ""
+    aula_notify_url: ""
+    aula_notify_urls: ""
+    openai_api_key: ""
+    copy_local_token: true
+    local_token_cache_path: "{{ playbook_dir }}/../.aula_tokens.json"
+    docker_engine_packages:
+      - docker.io
+    docker_compose_packages:
+      - docker-compose-plugin
+      - docker-compose-v2
+    deploy_files:
+      - .dockerignore
+      - Dockerfile
+      - README.md
+      - pyproject.toml
+      - uv.lock
+
+  tasks:
+    - name: Check local Aula token cache when token copy is enabled
+      ansible.builtin.stat:
+        path: "{{ local_token_cache_path }}"
+      delegate_to: localhost
+      become: false
+      register: local_token_cache
+      when: copy_local_token | bool
+
+    - name: Stop if local Aula token cache is missing
+      ansible.builtin.fail:
+        msg: "Token copy is enabled, but {{ local_token_cache_path }} does not exist. Run `uv run aula-project login` locally first, or set copy_local_token=false."
+      when:
+        - copy_local_token | bool
+        - not local_token_cache.stat.exists
+
+    - name: Stop if server notifications are enabled without Apprise URLs
+      ansible.builtin.fail:
+        msg: "Server notifications are enabled, but aula_notify_url/aula_notify_urls is empty. Add an Apprise URL or set aula_notify_enabled=false."
+      when:
+        - aula_notify_enabled | bool
+        - not (aula_notify_url | default("") | trim)
+        - not (aula_notify_urls | default("") | trim)
+
+    - name: Install Docker Engine package
+      ansible.builtin.apt:
+        name: "{{ docker_engine_packages }}"
+        state: present
+        update_cache: true
+
+    - name: Check whether Docker Compose v2 is already available
+      ansible.builtin.command:
+        cmd: docker compose version
+      register: docker_compose_existing
+      changed_when: false
+      failed_when: false
+
+    - name: Check available Docker Compose v2 package names
+      ansible.builtin.command:
+        cmd: "apt-cache show {{ item }}"
+      loop: "{{ docker_compose_packages }}"
+      register: docker_compose_package_checks
+      changed_when: false
+      failed_when: false
+      when: docker_compose_existing.rc != 0
+
+    - name: Install available Docker Compose v2 package
+      ansible.builtin.apt:
+        name: "{{ item.item }}"
+        state: present
+      loop: "{{ docker_compose_package_checks.results | default([]) }}"
+      when:
+        - docker_compose_existing.rc != 0
+        - item.rc == 0
+
+    - name: Verify Docker Compose v2 is available
+      ansible.builtin.command:
+        cmd: docker compose version
+      register: docker_compose_version
+      changed_when: false
+
+    - name: Ensure Docker service is enabled and running
+      ansible.builtin.service:
+        name: docker
+        enabled: true
+        state: started
+
+    - name: Allow deploy user to use Docker
+      ansible.builtin.user:
+        name: "{{ ansible_user }}"
+        groups: docker
+        append: true
+
+    - name: Create application directory
+      ansible.builtin.file:
+        path: "{{ aula_app_dir }}"
+        state: directory
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: "0750"
+
+    - name: Create runtime data directory
+      ansible.builtin.file:
+        path: "{{ aula_data_dir }}"
+        state: directory
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: "0700"
+
+    - name: Deploy Compose file
+      ansible.builtin.template:
+        src: templates/compose.yml.j2
+        dest: "{{ aula_app_dir }}/compose.yml"
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: "0640"
+
+    - name: Deploy environment file
+      ansible.builtin.template:
+        src: templates/env.j2
+        dest: "{{ aula_app_dir }}/.env"
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: "0600"
+
+    - name: Deploy project files
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../{{ item }}"
+        dest: "{{ aula_app_dir }}/{{ item }}"
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: "0640"
+      loop: "{{ deploy_files }}"
+
+    - name: Deploy source package
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../src"
+        dest: "{{ aula_app_dir }}/"
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: preserve
+
+    - name: Copy local Aula token cache when requested
+      ansible.builtin.copy:
+        src: "{{ local_token_cache_path }}"
+        dest: "{{ aula_data_dir }}/.aula_tokens.json"
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: "0600"
+      when: copy_local_token | bool
+
+    - name: Build container image
+      ansible.builtin.command:
+        cmd: docker compose build
+        chdir: "{{ aula_app_dir }}"
+      changed_when: true
+
+    - name: Start summary server
+      ansible.builtin.command:
+        cmd: docker compose up -d
+        chdir: "{{ aula_app_dir }}"
+      changed_when: true

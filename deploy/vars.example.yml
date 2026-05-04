@@ -1,0 +1,10 @@
+---
+aula_mitid_username: ""
+openai_api_key: ""
+aula_notify_url: ""
+aula_notify_urls: ""
+aula_notify_min_priority: medium
+aula_notify_enabled: false
+aula_notify_interval_minutes: 20
+aula_notify_thread_limit: 20
+copy_local_token: true
