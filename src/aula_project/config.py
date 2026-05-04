@@ -15,6 +15,8 @@ class Settings:
     mitid_username: str
     token_cache_path: Path
     scan_state_path: Path
+    message_cache_path: Path
+    summary_cache_path: Path
     raw_capture_dir: Path | None
     notify_urls: list[str]
     auth_method: str = "app"
@@ -23,6 +25,7 @@ class Settings:
     openai_model: str = "gpt-5.2"
     notify_min_priority: str = "medium"
     request_timeout_seconds: float = 60.0
+    summary_cache_seconds: float = 300.0
 
 
 def _resolve_path(value: str | None, default: str) -> Path:
@@ -63,6 +66,8 @@ def load_settings(
         mitid_username=mitid_username,
         token_cache_path=_resolve_path(os.getenv("AULA_TOKEN_CACHE_PATH"), ".aula_tokens.json"),
         scan_state_path=_resolve_path(os.getenv("AULA_SCAN_STATE_PATH"), ".aula_scan_state.json"),
+        message_cache_path=_resolve_path(os.getenv("AULA_MESSAGE_CACHE_PATH"), ".aula_message_cache.json"),
+        summary_cache_path=_resolve_path(os.getenv("AULA_SUMMARY_CACHE_PATH"), ".aula_summary_cache.json"),
         raw_capture_dir=raw_capture_dir,
         notify_urls=notify_urls,
         auth_method=os.getenv("AULA_AUTH_METHOD", "app").strip().lower() or "app",
@@ -71,4 +76,5 @@ def load_settings(
         openai_model=os.getenv("AULA_OPENAI_MODEL", "gpt-5.2").strip() or "gpt-5.2",
         notify_min_priority=os.getenv("AULA_NOTIFY_MIN_PRIORITY", "medium").strip().lower() or "medium",
         request_timeout_seconds=_float_env("AULA_REQUEST_TIMEOUT_SECONDS", 60.0),
+        summary_cache_seconds=_float_env("AULA_SUMMARY_CACHE_SECONDS", 300.0),
     )

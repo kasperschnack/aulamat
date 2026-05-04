@@ -30,6 +30,7 @@ The server layout is:
   data/
     .aula_tokens.json
     .aula_scan_state.json
+    .aula_message_cache.json
     .aula_raw/
 ```
 
@@ -70,4 +71,4 @@ Pushover is also a good fit:
 aula_notify_url: "pover://USER_KEY@APP_TOKEN"
 ```
 
-After changing notification settings, rerun the playbook. The notifier uses the same `/opt/aula/data/.aula_tokens.json` and `/opt/aula/data/.aula_scan_state.json` files as the summary server.
+After changing notification settings, rerun the playbook. The notifier uses the same `/opt/aula/data/.aula_tokens.json`, `/opt/aula/data/.aula_scan_state.json`, and `/opt/aula/data/.aula_message_cache.json` files as the summary server.

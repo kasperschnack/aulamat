@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+from copy import deepcopy
 from html import escape
 import json
 from pathlib import Path
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.parse import urlparse
@@ -82,15 +84,20 @@ def build_summary_shell_html() -> str:
     const render = (payload) => {
       const profile = payload.profile || {};
       const profileName = profile.display_name || profile.profile_id || "Unavailable";
-      document.getElementById("meta").innerHTML = `${escapeHtml(payload.auth?.message || "Unknown auth status")}<br>Profile: ${escapeHtml(profileName)}<br>Checked: ${escapeHtml(payload.checked_at)}`;
+      const cache = payload.summary_cache || {};
+      const cacheLine = cache.status === "stale"
+        ? `<br>Showing cached summary from ${escapeHtml(cache.cached_at || payload.checked_at)} because live Aula refresh failed: ${escapeHtml(cache.error || "unknown error")}`
+        : "";
+      document.getElementById("meta").innerHTML = `${escapeHtml(payload.auth?.message || "Unknown auth status")}<br>Profile: ${escapeHtml(profileName)}<br>Checked: ${escapeHtml(payload.checked_at)}${cacheLine}`;
 
       const important = payload.important_threads || [];
       const rows = important.map((item) => {
         const thread = item.thread || {};
-        const threadTime = formatDateTime(thread.last_message_at);
         const level = String(item.level || "low");
         const signals = (item.signals || []).slice(0, 4).map((signal) => String(signal.signal || "").replaceAll("_", " ")).join(", ");
-        const messages = (item.messages || []).map((message) => {
+        const itemMessages = item.messages || [];
+        const threadTime = formatDateTime(thread.last_message_at || itemMessages.find((message) => message.sent_at)?.sent_at);
+        const messages = itemMessages.map((message) => {
           const attachments = (message.attachments || []).map((attachment) => attachment.filename || attachment.attachment_id).filter(Boolean);
           const attachmentHtml = attachments.length ? `<div class="attachments">Attachments: ${escapeHtml(attachments.join(", "))}</div>` : "";
           const bodyText = message.body_text || "(no message text)";
@@ -199,6 +206,75 @@ async def build_summary_payload(
     }
 
 
+class SummaryPayloadCache:
+    def __init__(self, path: Path, *, ttl_seconds: float) -> None:
+        self.path = path
+        self.ttl_seconds = ttl_seconds
+        self._payload: dict[str, Any] | None = None
+        self._loaded_at = 0.0
+
+    async def get(
+        self,
+        settings: Settings,
+        *,
+        thread_limit: int | None,
+        result_limit: int | None,
+    ) -> dict[str, Any]:
+        now = time.monotonic()
+        if self._payload is not None and self.ttl_seconds > 0 and now - self._loaded_at <= self.ttl_seconds:
+            return self._with_cache_status(self._payload, status="hit")
+
+        try:
+            payload = await build_summary_payload(
+                settings,
+                thread_limit=thread_limit,
+                result_limit=result_limit,
+            )
+        except Exception as exc:
+            stale = self._payload or self._load_persisted()
+            if stale is None:
+                raise
+            return self._with_cache_status(stale, status="stale", error=str(exc))
+
+        self._payload = payload
+        self._loaded_at = now
+        self._save_persisted(payload)
+        return self._with_cache_status(payload, status="fresh")
+
+    def _with_cache_status(
+        self,
+        payload: dict[str, Any],
+        *,
+        status: str,
+        error: str | None = None,
+    ) -> dict[str, Any]:
+        annotated = deepcopy(payload)
+        cached_at = str(payload.get("checked_at") or "")
+        annotated["summary_cache"] = {
+            "status": status,
+            "cached_at": cached_at,
+            "ttl_seconds": self.ttl_seconds,
+        }
+        if error:
+            annotated["summary_cache"]["error"] = error
+        return annotated
+
+    def _load_persisted(self) -> dict[str, Any] | None:
+        try:
+            raw = json.loads(self.path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+        if not isinstance(raw, dict):
+            return None
+        self._payload = raw
+        self._loaded_at = 0.0
+        return raw
+
+    def _save_persisted(self, payload: dict[str, Any]) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
 def run_summary_server(
     settings: Settings,
     *,
@@ -207,6 +283,11 @@ def run_summary_server(
     thread_limit: int | None,
     result_limit: int | None,
 ) -> None:
+    payload_cache = SummaryPayloadCache(
+        settings.summary_cache_path,
+        ttl_seconds=settings.summary_cache_seconds,
+    )
+
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
             path = urlparse(self.path).path
@@ -219,7 +300,7 @@ def run_summary_server(
                     content_type = "text/html; charset=utf-8"
                 else:
                     payload = asyncio.run(
-                        build_summary_payload(
+                        payload_cache.get(
                             settings,
                             thread_limit=thread_limit,
                             result_limit=result_limit,
@@ -252,7 +333,7 @@ def _important_row(item: dict[str, Any]) -> str:
     level = str(item["level"])
     signals = ", ".join(signal["signal"].replace("_", " ") for signal in item.get("signals", [])[:4])
     messages = "".join(_message_block(message) for message in item.get("messages", []))
-    thread_time = _format_display_datetime(thread.get("last_message_at"))
+    thread_time = _format_display_datetime(thread.get("last_message_at") or _first_message_sent_at(item))
     thread_time_html = f'<span class="thread-time">{escape(thread_time)}</span>' if thread_time else ""
     return (
         "<tr>"
@@ -289,6 +370,13 @@ def _message_block(message: dict[str, Any]) -> str:
         f"{attachment_html}"
         "</div>"
     )
+
+
+def _first_message_sent_at(item: dict[str, Any]) -> Any:
+    for message in item.get("messages", []):
+        if isinstance(message, dict) and message.get("sent_at"):
+            return message["sent_at"]
+    return None
 
 
 def _truncate_single_line(value: str, limit: int) -> str:

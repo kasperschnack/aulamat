@@ -40,17 +40,32 @@ def _to_plain_data(value: Any) -> Any:
         return _to_plain_data(value.model_dump())
     if hasattr(value, "__dict__"):
         data = {key: val for key, val in vars(value).items() if not key.startswith("_")}
+        raw = getattr(value, "_raw", None)
+        if raw is not None:
+            data["raw"] = _to_plain_data(raw)
         return _to_plain_data(data)
     return repr(value)
 
 
 def _lookup(raw: Any, *names: str, default: Any = None) -> Any:
+    raw_payload = getattr(raw, "_raw", None)
     for name in names:
         if isinstance(raw, dict) and name in raw:
             return raw[name]
         if hasattr(raw, name):
             return getattr(raw, name)
+        if isinstance(raw_payload, dict) and name in raw_payload:
+            return raw_payload[name]
     return default
+
+
+def _lookup_nested(raw: Any, *path: str) -> Any:
+    value = raw
+    for name in path:
+        value = _lookup(value, name)
+        if value is None:
+            return None
+    return value
 
 
 def _normalize_str(value: Any) -> str | None:
@@ -102,6 +117,23 @@ def _extract_text_from_html(value: str | None) -> str | None:
     text = unescape(parser.get_text())
     collapsed = re.sub(r"\s+", " ", text).strip()
     return collapsed or None
+
+
+def _html_from_text_payload(value: Any) -> str | None:
+    if isinstance(value, dict):
+        return _normalize_str(_lookup(value, "html"))
+    return None
+
+
+def _text_from_payload(value: Any) -> str | None:
+    if isinstance(value, dict):
+        text_value = _lookup(value, "text")
+        return (
+            _extract_text_from_html(_html_from_text_payload(value))
+            or _extract_text_from_html(_html_from_text_payload(text_value))
+            or _normalize_str(text_value)
+        )
+    return _normalize_str(value)
 
 
 def _normalize_participants(raw: Any) -> list[str]:
@@ -192,24 +224,29 @@ def normalize_thread(raw: Any) -> MessageThread:
                 "lastMessageAt",
                 "latestMessageTimestamp",
                 "lastMessageTimestamp",
+                "sendDateTime",
+                "startedTime",
                 "timestamp",
                 "createdAt",
                 "created",
             )
-        ),
+        )
+        or _normalize_str(_lookup_nested(raw, "latestMessage", "sendDateTime")),
         unread=_normalize_bool(unread_value),
-        preview_text=_normalize_str(
+        preview_text=_text_from_payload(
             _lookup(raw, "preview", "snippet", "latestMessageText", "latestMessage", "messagePreview")
-        ),
+        )
+        or _text_from_payload(_lookup_nested(raw, "latestMessage", "text")),
         raw=_to_plain_data(raw) or {},
     )
 
 
 def normalize_message(raw: Any, thread_id: str | None = None) -> MessageItem:
+    text_payload = _lookup(raw, "text")
     html_body = _normalize_str(
         _lookup(raw, "body_html", "bodyHtml", "html", "messageHtml", "content_html", "contentHtml")
-    )
-    text_body = _normalize_str(
+    ) or _html_from_text_payload(text_payload)
+    text_body = _text_from_payload(
         _lookup(raw, "body_text", "bodyText", "text", "message", "messageText", "content")
     )
     if not text_body:
@@ -236,7 +273,9 @@ def normalize_message(raw: Any, thread_id: str | None = None) -> MessageItem:
                 default=_lookup(sender, "display_name", "displayName", "name", "fullName", default=sender),
             )
         ),
-        sent_at=_normalize_str(_lookup(raw, "sent_at", "sentAt", "createdAt", "created", "date", "timestamp")),
+        sent_at=_normalize_str(
+            _lookup(raw, "sent_at", "sentAt", "sendDateTime", "createdAt", "created", "date", "timestamp")
+        ),
         body_text=text_body,
         body_html=html_body,
         attachments=attachments,

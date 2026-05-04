@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 from aula_project.models import MessageSource
-from aula_project.normalize import normalize_profile, normalize_threads
+from aula_project.normalize import normalize_messages, normalize_profile, normalize_threads
 
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
@@ -60,3 +60,43 @@ def test_normalize_threads_supports_live_aliases_and_string_booleans() -> None:
     assert threads[0].preview_text == "Barnet skal hentes tidligere."
     assert threads[1].thread_id == "live-thread-2"
     assert threads[1].unread is True
+
+
+class _AulaLikeObject:
+    def __init__(self, **values) -> None:
+        self.__dict__.update(values)
+
+
+def test_normalize_reads_private_aula_raw_payload() -> None:
+    thread = _AulaLikeObject(
+        thread_id=123,
+        subject="Tur på fredag",
+        _raw={
+            "id": 123,
+            "subject": "Tur på fredag",
+            "latestMessage": {
+                "sendDateTime": "2026-05-01T07:30:00Z",
+                "text": {"html": "Lærer: Husk madpakke."},
+            },
+        },
+    )
+    message = _AulaLikeObject(
+        id="message-1",
+        content_html="<p>Husk madpakke.</p>",
+        _raw={
+            "id": "message-1",
+            "sendDateTime": "2026-05-01T07:30:00Z",
+            "sender": {"fullName": "Lærer"},
+            "text": {"html": "<p>Husk madpakke.</p>"},
+        },
+    )
+
+    threads = normalize_threads([thread])
+    messages = normalize_messages([message], thread_id="123")
+
+    assert threads[0].last_message_at == "2026-05-01T07:30:00Z"
+    assert threads[0].preview_text == "Lærer: Husk madpakke."
+    assert threads[0].raw["raw"]["latestMessage"]["sendDateTime"] == "2026-05-01T07:30:00Z"
+    assert messages[0].sent_at == "2026-05-01T07:30:00Z"
+    assert messages[0].sender_name == "Lærer"
+    assert messages[0].body_text == "Husk madpakke."

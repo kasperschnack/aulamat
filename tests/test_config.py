@@ -11,6 +11,9 @@ def test_load_settings_reads_notification_and_timeout_values(monkeypatch) -> Non
 
     settings = load_settings(env_file=None)
 
+    assert str(settings.message_cache_path) == ".aula_message_cache.json"
+    assert str(settings.summary_cache_path) == ".aula_summary_cache.json"
+    assert settings.summary_cache_seconds == 300.0
     assert settings.notify_urls == ["pover://one", "ntfy://topic"]
     assert settings.notify_min_priority == "high"
     assert settings.request_timeout_seconds == 12.5

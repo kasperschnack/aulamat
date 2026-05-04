@@ -11,6 +11,7 @@
     aula_port: 8767
     aula_thread_limit: 20
     aula_summary_limit: 10
+    aula_summary_cache_seconds: 300
     aula_notify_enabled: false
     aula_notify_interval_minutes: 20
     aula_notify_thread_limit: 20

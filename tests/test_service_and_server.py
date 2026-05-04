@@ -4,7 +4,7 @@ from pathlib import Path
 import plistlib
 
 from aula_project.service import build_launchd_service, build_summary_launchd_service, launchd_plist, write_launchd_plist
-from aula_project.summary_server import build_summary_html
+from aula_project.summary_server import SummaryPayloadCache, build_summary_html
 
 
 def test_build_launchd_service_plist_contains_notify_command(monkeypatch, tmp_path: Path) -> None:
@@ -119,3 +119,51 @@ def test_summary_html_renders_important_threads() -> None:
     assert "Husk madpakke og regntøj." in html
     assert "program.pdf" in html
     assert "response requested" in html
+
+
+def test_summary_html_uses_message_timestamp_when_thread_timestamp_is_missing() -> None:
+    html = build_summary_html(
+        {
+            "checked_at": "2026-05-01T08:00:00Z",
+            "auth": {"message": "Cached Aula token is reusable."},
+            "profile": {"display_name": "Kasper"},
+            "important_threads": [
+                {
+                    "thread": {
+                        "thread_id": "thread-1",
+                        "title": "Tur på fredag",
+                    },
+                    "level": "medium",
+                    "score": 5,
+                    "signals": [],
+                    "messages": [
+                        {
+                            "sender_name": "Lærer",
+                            "sent_at": "2026-05-01T07:30:00Z",
+                            "body_text": "Husk madpakke og regntøj.",
+                            "attachments": [],
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+
+    assert "2026-05-01 07:30" in html
+
+
+def test_summary_payload_cache_serves_stale_payload_after_error(tmp_path: Path) -> None:
+    cache = SummaryPayloadCache(tmp_path / "summary-cache.json", ttl_seconds=0)
+    payload = {
+        "checked_at": "2026-05-01T08:00:00Z",
+        "auth": {"message": "Cached Aula token is reusable."},
+        "profile": {"display_name": "Kasper"},
+        "important_threads": [],
+    }
+    cache._save_persisted(payload)
+
+    cached = cache._with_cache_status(payload, status="stale", error="HTTP 429")
+
+    assert cached["summary_cache"]["status"] == "stale"
+    assert cached["summary_cache"]["cached_at"] == "2026-05-01T08:00:00Z"
+    assert cached["summary_cache"]["error"] == "HTTP 429"

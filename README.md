@@ -34,7 +34,7 @@ Default human-readable output is intentionally concise. When timestamps are show
 
 ## Scheduled Review
 
-`review-new` is intended for scheduled runs. It reads recent threads, expands them into full messages, filters messages received since the previous successful scan, asks OpenAI for a structured relevance decision, and stores its checkpoint in `.aula_scan_state.json`.
+`review-new` is intended for scheduled runs. It reads recent threads, expands changed or uncached threads into full messages, filters messages received since the previous successful scan, asks OpenAI for a structured relevance decision, and stores its checkpoint in `.aula_scan_state.json`. Thread messages are cached in `.aula_message_cache.json` so unchanged threads do not need to be expanded on every run.
 
 For automation or downstream processing, use the default compact JSON:
 
@@ -168,6 +168,7 @@ docker compose down
 - `AULA_AUTH_METHOD`: `app` or `token`, defaults to `app`
 - `AULA_TOKEN_CACHE_PATH`: token cache file path, defaults to `.aula_tokens.json`
 - `AULA_SCAN_STATE_PATH`: scheduled scan checkpoint path, defaults to `.aula_scan_state.json`
+- `AULA_MESSAGE_CACHE_PATH`: per-thread message cache path, defaults to `.aula_message_cache.json`
 - `AULA_RAW_CAPTURE_DIR`: optional directory for saved raw payloads
 - `AULA_MESSAGE_LIMIT`: default thread listing limit, defaults to `10`
 - `AULA_JSON_INDENT`: JSON indentation, defaults to `2`

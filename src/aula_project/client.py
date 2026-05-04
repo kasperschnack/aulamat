@@ -9,6 +9,7 @@ from typing import Any
 
 from aula_project.auth import authenticated_client, authenticated_session, inspect_token_cache
 from aula_project.config import Settings
+from aula_project.message_cache import MessageCache, load_message_cache, save_message_cache
 from aula_project.models import AuthCacheStatus, AuthResult, MessageItem, MessageThread, Profile, ThreadAssessment
 from aula_project.normalize import normalize_messages, normalize_profile, normalize_threads
 from aula_project.openai_review import review_new_messages_with_openai
@@ -75,6 +76,31 @@ class AulaDataClient:
     def get_auth_cache_status(self) -> AuthCacheStatus:
         return inspect_token_cache(self.settings.token_cache_path)
 
+    def _cached_messages_for_thread(
+        self,
+        cache: MessageCache,
+        thread: MessageThread,
+    ) -> list[MessageItem] | None:
+        return cache.get_messages(thread)
+
+    async def _messages_for_thread(
+        self,
+        session_client: Any,
+        thread: MessageThread,
+        *,
+        cache: MessageCache,
+        save_raw: bool,
+    ) -> tuple[list[MessageItem], bool]:
+        cached_messages = self._cached_messages_for_thread(cache, thread)
+        if cached_messages is not None:
+            return cached_messages, False
+
+        raw_messages = await session_client.get_messages_for_thread(thread.thread_id)
+        self._save_raw(f"thread-{thread.thread_id}-messages", raw_messages, enabled=save_raw)
+        messages = normalize_messages(raw_messages or [], thread_id=thread.thread_id)
+        cache.set_messages(thread, messages)
+        return messages, True
+
     async def login(self, *, save_raw: bool = False) -> tuple[Profile, AuthResult]:
         async with authenticated_session(self.settings) as session:
             raw_profile = await session.client.get_profile()
@@ -123,12 +149,21 @@ class AulaDataClient:
             if thread_limit is not None:
                 threads = threads[:thread_limit]
 
+            message_cache = load_message_cache(self.settings.message_cache_path)
+            cache_changed = False
             assessments: list[ThreadAssessment] = []
             for thread in threads:
-                raw_messages = await session.client.get_messages_for_thread(thread.thread_id)
-                self._save_raw(f"thread-{thread.thread_id}-messages", raw_messages, enabled=save_raw)
-                messages = normalize_messages(raw_messages or [], thread_id=thread.thread_id)
+                messages, fetched = await self._messages_for_thread(
+                    session.client,
+                    thread,
+                    cache=message_cache,
+                    save_raw=save_raw,
+                )
+                cache_changed = cache_changed or fetched
                 assessments.append(assess_thread(thread, messages))
+
+        if cache_changed:
+            save_message_cache(self.settings.message_cache_path, message_cache)
 
         ranked = rank_threads(assessments, include_low=include_low)
         if result_limit is not None:
@@ -154,14 +189,21 @@ class AulaDataClient:
             if thread_limit is not None:
                 threads = threads[:thread_limit]
 
+            message_cache = load_message_cache(self.settings.message_cache_path)
+            cache_changed = False
             messages_by_thread_id: dict[str, list[MessageItem]] = {}
             for thread in threads:
-                raw_messages = await session.client.get_messages_for_thread(thread.thread_id)
-                self._save_raw(f"thread-{thread.thread_id}-messages", raw_messages, enabled=save_raw)
-                messages_by_thread_id[thread.thread_id] = normalize_messages(
-                    raw_messages or [],
-                    thread_id=thread.thread_id,
+                messages, fetched = await self._messages_for_thread(
+                    session.client,
+                    thread,
+                    cache=message_cache,
+                    save_raw=save_raw,
                 )
+                cache_changed = cache_changed or fetched
+                messages_by_thread_id[thread.thread_id] = messages
+
+        if cache_changed:
+            save_message_cache(self.settings.message_cache_path, message_cache)
 
         items = build_new_thread_messages(threads, messages_by_thread_id, review_state)
         openai_review = None

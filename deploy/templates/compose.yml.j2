@@ -7,6 +7,9 @@ services:
     environment:
       AULA_TOKEN_CACHE_PATH: /data/.aula_tokens.json
       AULA_SCAN_STATE_PATH: /data/.aula_scan_state.json
+      AULA_MESSAGE_CACHE_PATH: /data/.aula_message_cache.json
+      AULA_SUMMARY_CACHE_PATH: /data/.aula_summary_cache.json
+      AULA_SUMMARY_CACHE_SECONDS: "{{ aula_summary_cache_seconds }}"
       AULA_RAW_CAPTURE_DIR: /data/.aula_raw
     ports:
       - "{{ aula_bind_address }}:{{ aula_port }}:8767"
@@ -33,6 +36,9 @@ services:
     environment:
       AULA_TOKEN_CACHE_PATH: /data/.aula_tokens.json
       AULA_SCAN_STATE_PATH: /data/.aula_scan_state.json
+      AULA_MESSAGE_CACHE_PATH: /data/.aula_message_cache.json
+      AULA_SUMMARY_CACHE_PATH: /data/.aula_summary_cache.json
+      AULA_SUMMARY_CACHE_SECONDS: "{{ aula_summary_cache_seconds }}"
       AULA_RAW_CAPTURE_DIR: /data/.aula_raw
     volumes:
       - {{ aula_data_dir }}:/data
