@@ -4,6 +4,7 @@ import asyncio
 from copy import deepcopy
 from html import escape
 import json
+import logging
 from pathlib import Path
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -12,6 +13,9 @@ from urllib.parse import urlparse
 
 from aula_project.client import AulaDataClient
 from aula_project.config import Settings
+
+
+_LOGGER = logging.getLogger(__name__)
 
 
 def build_summary_shell_html() -> str:
@@ -222,9 +226,20 @@ class SummaryPayloadCache:
     ) -> dict[str, Any]:
         now = time.monotonic()
         if self._payload is not None and self.ttl_seconds > 0 and now - self._loaded_at <= self.ttl_seconds:
+            _LOGGER.info(
+                "Serving summary from memory cache age_seconds=%.1f ttl_seconds=%.1f",
+                now - self._loaded_at,
+                self.ttl_seconds,
+            )
             return self._with_cache_status(self._payload, status="hit")
 
+        started = time.monotonic()
         try:
+            _LOGGER.info(
+                "Refreshing Aula summary thread_limit=%s result_limit=%s",
+                thread_limit,
+                result_limit,
+            )
             payload = await build_summary_payload(
                 settings,
                 thread_limit=thread_limit,
@@ -233,12 +248,24 @@ class SummaryPayloadCache:
         except Exception as exc:
             stale = self._payload or self._load_persisted()
             if stale is None:
+                _LOGGER.exception("Aula summary refresh failed without cached fallback")
                 raise
+            _LOGGER.warning(
+                "Aula summary refresh failed; serving stale cache error=%s cached_at=%s",
+                exc,
+                stale.get("checked_at"),
+            )
             return self._with_cache_status(stale, status="stale", error=str(exc))
 
         self._payload = payload
         self._loaded_at = now
         self._save_persisted(payload)
+        _LOGGER.info(
+            "Aula summary refreshed duration_seconds=%.2f important_threads=%s checked_at=%s",
+            time.monotonic() - started,
+            len(payload.get("important_threads", [])),
+            payload.get("checked_at"),
+        )
         return self._with_cache_status(payload, status="fresh")
 
     def _with_cache_status(
@@ -283,6 +310,7 @@ def run_summary_server(
     thread_limit: int | None,
     result_limit: int | None,
 ) -> None:
+    _LOGGER.setLevel(logging.INFO)
     payload_cache = SummaryPayloadCache(
         settings.summary_cache_path,
         ttl_seconds=settings.summary_cache_seconds,
@@ -309,6 +337,7 @@ def run_summary_server(
                     body = json.dumps(payload, indent=2, ensure_ascii=False).encode("utf-8")
                     content_type = "application/json; charset=utf-8"
             except Exception as exc:  # pragma: no cover - runtime diagnostics
+                _LOGGER.exception("Summary request failed path=%s", path)
                 self.send_error(500, explain=str(exc))
                 return
 
