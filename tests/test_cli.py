@@ -8,6 +8,7 @@ from aula_project.cli import (
     _format_auth_status_text,
     _format_important_text,
     _format_messages_text,
+    _format_service_text,
     _format_threads_text,
     _with_timeout,
 )
@@ -39,6 +40,49 @@ def test_review_new_defaults_to_text_but_accepts_json_flag() -> None:
 
     assert default_args.format == "text"
     assert json_args.json is True
+
+
+def test_install_service_defaults_to_summary_server() -> None:
+    parser = _build_parser()
+
+    args = parser.parse_args(["install-service"])
+
+    assert args.no_summary_server is False
+    assert args.summary_host == "127.0.0.1"
+    assert args.summary_port == 8767
+    assert args.summary_limit == 10
+
+
+def test_service_text_shows_multiple_services_and_summary_url() -> None:
+    text = _format_service_text(
+        {
+            "summary_url": "http://127.0.0.1:8767/",
+            "services": [
+                {
+                    "label": "dk.local.aula-project.notify",
+                    "plist_path": "/tmp/notify.plist",
+                    "interval_minutes": 20,
+                    "command": ["uv", "run", "aula-project", "notify-new"],
+                    "loaded": True,
+                    "load_error": None,
+                },
+                {
+                    "label": "dk.local.aula-project.summary",
+                    "plist_path": "/tmp/summary.plist",
+                    "interval_minutes": None,
+                    "command": ["uv", "run", "aula-project", "summary-server"],
+                    "loaded": True,
+                    "load_error": None,
+                },
+            ],
+        }
+    )
+
+    assert "dk.local.aula-project.notify" in text
+    assert "Interval: 20m" in text
+    assert "dk.local.aula-project.summary" in text
+    assert "Mode: always on" in text
+    assert "Summary: http://127.0.0.1:8767/" in text
 
 
 def test_threads_text_is_clean_and_omits_raw_json() -> None:

@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 import plistlib
 
-from aula_project.service import build_launchd_service, launchd_plist, write_launchd_plist
+from aula_project.service import build_launchd_service, build_summary_launchd_service, launchd_plist, write_launchd_plist
 from aula_project.summary_server import build_summary_html
 
 
@@ -49,6 +49,38 @@ def test_write_launchd_plist_writes_valid_plist(monkeypatch, tmp_path: Path) -> 
     assert parsed["ProgramArguments"][:3] == ["/opt/homebrew/bin/uv", "run", "aula-project"]
 
 
+def test_build_summary_launchd_service_plist_keeps_server_alive(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr("aula_project.service.shutil.which", lambda name: "/opt/homebrew/bin/uv")
+
+    service = build_summary_launchd_service(
+        project_dir=tmp_path,
+        host="127.0.0.1",
+        port=8765,
+        thread_limit=20,
+        result_limit=10,
+        plist_dir=tmp_path,
+    )
+    plist = launchd_plist(service, project_dir=tmp_path)
+
+    assert service.label == "dk.local.aula-project.summary"
+    assert plist["ProgramArguments"] == [
+        "/opt/homebrew/bin/uv",
+        "run",
+        "aula-project",
+        "summary-server",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "8765",
+        "--thread-limit",
+        "20",
+        "--limit",
+        "10",
+    ]
+    assert plist["KeepAlive"] is True
+    assert "StartInterval" not in plist
+
+
 def test_summary_html_renders_important_threads() -> None:
     html = build_summary_html(
         {
@@ -61,6 +93,14 @@ def test_summary_html_renders_important_threads() -> None:
                     "level": "medium",
                     "score": 5,
                     "signals": [{"signal": "response_requested"}],
+                    "messages": [
+                        {
+                            "sender_name": "Lærer",
+                            "sent_at": "2026-05-01T07:30:00Z",
+                            "body_text": "Husk madpakke og regntøj.",
+                            "attachments": [{"filename": "program.pdf"}],
+                        }
+                    ],
                 }
             ],
         }
@@ -68,4 +108,6 @@ def test_summary_html_renders_important_threads() -> None:
 
     assert "Aula Summary" in html
     assert "Tur på fredag" in html
+    assert "Husk madpakke og regntøj." in html
+    assert "program.pdf" in html
     assert "response requested" in html

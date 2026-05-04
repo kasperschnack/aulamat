@@ -17,10 +17,21 @@ from aula_project.models import (
     Profile,
     ThreadAssessment,
 )
-from aula_project.notifications import AppriseNotifier, TerminalNotifier, build_notification_plan, send_notification
+from aula_project.notifications import (
+    AppriseNotifier,
+    TerminalNotifier,
+    build_notification_plan,
+    send_notification,
+)
 from aula_project.scan_state import load_scan_state, save_scan_state
 from aula_project.scheduled_review import mark_reviewed
-from aula_project.service import build_launchd_service, launchd_plist, write_launchd_plist
+from aula_project.service import (
+    DEFAULT_SUMMARY_SERVER_PORT,
+    build_launchd_service,
+    build_summary_launchd_service,
+    launchd_plist,
+    write_launchd_plist,
+)
 from aula_project.summary_server import run_summary_server
 
 
@@ -206,6 +217,15 @@ def _build_parser() -> argparse.ArgumentParser:
     install_service_parser.add_argument("--no-openai", action="store_true")
     install_service_parser.add_argument("--label", default="dk.local.aula-project.notify")
     install_service_parser.add_argument("--plist-dir", default=None)
+    install_service_parser.add_argument(
+        "--no-summary-server",
+        action="store_true",
+        help="Only install the notification checker, not the always-on summary server.",
+    )
+    install_service_parser.add_argument("--summary-label", default="dk.local.aula-project.summary")
+    install_service_parser.add_argument("--summary-host", default="127.0.0.1")
+    install_service_parser.add_argument("--summary-port", type=int, default=DEFAULT_SUMMARY_SERVER_PORT)
+    install_service_parser.add_argument("--summary-limit", type=int, default=10)
     install_service_parser.add_argument("--load", action="store_true", help="Load the launchd job after writing it.")
     install_service_parser.add_argument("--json", action="store_true", help="Print installed service details as JSON.")
     install_service_parser.set_defaults(command="install-service")
@@ -215,7 +235,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Serve a local Aula summary page and JSON endpoint.",
     )
     summary_server_parser.add_argument("--host", default="127.0.0.1")
-    summary_server_parser.add_argument("--port", type=int, default=8765)
+    summary_server_parser.add_argument("--port", type=int, default=DEFAULT_SUMMARY_SERVER_PORT)
     summary_server_parser.add_argument("--thread-limit", type=int, default=None)
     summary_server_parser.add_argument("--limit", type=int, default=10)
     summary_server_parser.set_defaults(command="summary-server")
@@ -353,17 +373,24 @@ def _build_notifier(notify_urls: list[str]) -> Any:
 
 
 def _format_service_text(payload: dict[str, Any]) -> str:
-    lines = [
-        "Installed Aula notification service.",
-        f"Label: {payload['label']}",
-        f"Plist: {payload['plist_path']}",
-        f"Interval: {payload['interval_minutes']}m",
-        "Command: " + " ".join(payload["command"]),
-    ]
-    if payload.get("loaded"):
-        lines.append("Launchd job loaded.")
-    elif payload.get("load_error"):
-        lines.append(f"Launchd load failed: {payload['load_error']}")
+    services = payload.get("services", [payload])
+    lines = ["Installed Aula services:"]
+    for service in services:
+        lines.append(f"- {service['label']}")
+        lines.append(f"  Plist: {service['plist_path']}")
+        interval_minutes = service.get("interval_minutes")
+        if interval_minutes is None:
+            lines.append("  Mode: always on")
+        else:
+            lines.append(f"  Interval: {interval_minutes}m")
+        lines.append("  Command: " + " ".join(service["command"]))
+        if service.get("loaded"):
+            lines.append("  Launchd job loaded.")
+        elif service.get("load_error"):
+            lines.append(f"  Launchd load failed: {service['load_error']}")
+    summary_url = payload.get("summary_url")
+    if summary_url:
+        lines.append(f"Summary: {summary_url}")
     return "\n".join(lines)
 
 
@@ -667,34 +694,55 @@ async def _run_async(args: argparse.Namespace) -> int:
         return 2 if notification_failed else 0
 
     if args.command == "install-service":
-        service = build_launchd_service(
+        plist_dir = Path(args.plist_dir).expanduser() if args.plist_dir else None
+        notification_service = build_launchd_service(
             project_dir=Path.cwd(),
             interval_minutes=args.interval_minutes,
             thread_limit=args.thread_limit,
             min_priority=args.min_priority,
             no_openai=args.no_openai,
             label=args.label,
-            plist_dir=Path(args.plist_dir).expanduser() if args.plist_dir else None,
+            plist_dir=plist_dir,
         )
-        write_launchd_plist(service, project_dir=Path.cwd())
-        payload = service.to_dict()
-        payload["plist"] = launchd_plist(service, project_dir=Path.cwd())
-        payload["loaded"] = False
-        payload["load_error"] = None
-        if args.load:
-            result = subprocess.run(
-                ["launchctl", "load", str(service.plist_path)],
-                check=False,
-                capture_output=True,
-                text=True,
+        services = [notification_service]
+        if not args.no_summary_server:
+            services.append(
+                build_summary_launchd_service(
+                    project_dir=Path.cwd(),
+                    host=args.summary_host,
+                    port=args.summary_port,
+                    thread_limit=args.thread_limit,
+                    result_limit=args.summary_limit,
+                    label=args.summary_label,
+                    plist_dir=plist_dir,
+                )
             )
-            payload["loaded"] = result.returncode == 0
-            payload["load_error"] = result.stderr.strip() or result.stdout.strip() or None
+
+        service_payloads = []
+        for service in services:
+            write_launchd_plist(service, project_dir=Path.cwd())
+            service_payload = service.to_dict()
+            service_payload["plist"] = launchd_plist(service, project_dir=Path.cwd())
+            service_payload["loaded"] = False
+            service_payload["load_error"] = None
+            if args.load:
+                load_result = _load_launchd_service(service.plist_path)
+                service_payload["loaded"] = load_result["loaded"]
+                service_payload["load_error"] = load_result["load_error"]
+            service_payloads.append(service_payload)
+
+        payload = {
+            "services": service_payloads,
+            "summary_url": None
+            if args.no_summary_server
+            else f"http://{args.summary_host}:{args.summary_port}/",
+        }
+        load_failed = any(service.get("load_error") for service in service_payloads)
         if args.json or args.verbose:
             _render(payload, indent=settings.json_indent)
         else:
             print(_format_service_text(payload))
-        return 0 if not payload["load_error"] else 2
+        return 2 if load_failed else 0
 
     if args.command == "summary-server":
         thread_limit = args.thread_limit if args.thread_limit is not None else settings.default_limit
@@ -709,6 +757,22 @@ async def _run_async(args: argparse.Namespace) -> int:
         return 0
 
     raise RuntimeError(f"Unknown command: {args.command}")
+
+
+def _load_launchd_service(plist_path: Path) -> dict[str, Any]:
+    result = subprocess.run(
+        ["launchctl", "load", str(plist_path)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode == 0:
+        return {"loaded": True, "load_error": None}
+
+    message = result.stderr.strip() or result.stdout.strip() or None
+    if message and "service already loaded" in message.lower():
+        return {"loaded": True, "load_error": None}
+    return {"loaded": False, "load_error": message}
 
 
 def main() -> None:

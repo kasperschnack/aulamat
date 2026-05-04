@@ -12,6 +12,88 @@ from aula_project.client import AulaDataClient
 from aula_project.config import Settings
 
 
+def build_summary_shell_html() -> str:
+    return """<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Aula Summary</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 2rem; color: #1f2933; }
+    main { max-width: 980px; margin: 0 auto; }
+    h1 { font-size: 1.8rem; margin-bottom: 0.25rem; }
+    .meta { color: #52606d; margin-bottom: 1.5rem; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { border-bottom: 1px solid #d9e2ec; padding: 0.65rem; text-align: left; vertical-align: top; }
+    th { color: #334e68; font-size: 0.85rem; text-transform: uppercase; }
+    .thread-title { font-weight: 700; }
+    .message { margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid #edf2f7; }
+    .message-meta { color: #52606d; font-size: 0.85rem; margin-bottom: 0.25rem; }
+    .message-body { white-space: pre-wrap; line-height: 1.45; }
+    .attachments { color: #52606d; font-size: 0.85rem; margin-top: 0.35rem; }
+    .level-high { color: #b42318; font-weight: 700; }
+    .level-medium { color: #9a6700; font-weight: 700; }
+    .level-low { color: #3f6212; font-weight: 700; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Aula Summary</h1>
+    <div class="meta" id="meta">Loading Aula summary...</div>
+    <table>
+      <thead><tr><th>Priority</th><th>Thread and messages</th><th>Score</th><th>Signals</th></tr></thead>
+      <tbody id="rows"><tr><td colspan="4">Loading...</td></tr></tbody>
+    </table>
+  </main>
+  <script>
+    const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#39;",
+    }[char]));
+
+    const render = (payload) => {
+      const profile = payload.profile || {};
+      const profileName = profile.display_name || profile.profile_id || "Unavailable";
+      document.getElementById("meta").innerHTML = `${escapeHtml(payload.auth?.message || "Unknown auth status")}<br>Profile: ${escapeHtml(profileName)}<br>Checked: ${escapeHtml(payload.checked_at)}`;
+
+      const important = payload.important_threads || [];
+      const rows = important.map((item) => {
+        const thread = item.thread || {};
+        const level = String(item.level || "low");
+        const signals = (item.signals || []).slice(0, 4).map((signal) => String(signal.signal || "").replaceAll("_", " ")).join(", ");
+        const messages = (item.messages || []).map((message) => {
+          const attachments = (message.attachments || []).map((attachment) => attachment.filename || attachment.attachment_id).filter(Boolean);
+          const attachmentHtml = attachments.length ? `<div class="attachments">Attachments: ${escapeHtml(attachments.join(", "))}</div>` : "";
+          return `<div class="message"><div class="message-meta">${escapeHtml(message.sender_name || "Unknown sender")}${message.sent_at ? ` - ${escapeHtml(message.sent_at)}` : ""}</div><div class="message-body">${escapeHtml(message.body_text || "(no message text)")}</div>${attachmentHtml}</div>`;
+        }).join("");
+        return `<tr><td class="level-${escapeHtml(level)}">${escapeHtml(level.charAt(0).toUpperCase() + level.slice(1))}</td><td><div class="thread-title">${escapeHtml(thread.title || "(no subject)")}</div><small>${escapeHtml(thread.thread_id)}</small>${messages}</td><td>${escapeHtml(item.score || 0)}</td><td>${escapeHtml(signals)}</td></tr>`;
+      }).join("");
+      document.getElementById("rows").innerHTML = rows || '<tr><td colspan="4">No important Aula threads found.</td></tr>';
+    };
+
+    const load = async () => {
+      try {
+        const response = await fetch("/api/summary", { cache: "no-store" });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        render(await response.json());
+      } catch (error) {
+        document.getElementById("meta").textContent = `Failed to load Aula summary: ${error.message}`;
+        document.getElementById("rows").innerHTML = '<tr><td colspan="4">Summary data unavailable.</td></tr>';
+      }
+    };
+
+    load();
+    setInterval(load, 300000);
+  </script>
+</body>
+</html>
+"""
+
+
 def build_summary_html(payload: dict[str, Any]) -> str:
     auth = payload["auth"]
     profile = payload.get("profile")
@@ -37,6 +119,11 @@ def build_summary_html(payload: dict[str, Any]) -> str:
     table {{ width: 100%; border-collapse: collapse; }}
     th, td {{ border-bottom: 1px solid #d9e2ec; padding: 0.65rem; text-align: left; vertical-align: top; }}
     th {{ color: #334e68; font-size: 0.85rem; text-transform: uppercase; }}
+    .thread-title {{ font-weight: 700; }}
+    .message {{ margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid #edf2f7; }}
+    .message-meta {{ color: #52606d; font-size: 0.85rem; margin-bottom: 0.25rem; }}
+    .message-body {{ white-space: pre-wrap; line-height: 1.45; }}
+    .attachments {{ color: #52606d; font-size: 0.85rem; margin-top: 0.35rem; }}
     .level-high {{ color: #b42318; font-weight: 700; }}
     .level-medium {{ color: #9a6700; font-weight: 700; }}
     .level-low {{ color: #3f6212; font-weight: 700; }}
@@ -47,7 +134,7 @@ def build_summary_html(payload: dict[str, Any]) -> str:
     <h1>Aula Summary</h1>
     <div class="meta">{status}<br>Profile: {profile_name}<br>Checked: {escape(str(payload["checked_at"]))}</div>
     <table>
-      <thead><tr><th>Priority</th><th>Thread</th><th>Score</th><th>Signals</th></tr></thead>
+      <thead><tr><th>Priority</th><th>Thread and messages</th><th>Score</th><th>Signals</th></tr></thead>
       <tbody>{rows}</tbody>
     </table>
   </main>
@@ -93,19 +180,19 @@ def run_summary_server(
                 self.send_error(404)
                 return
             try:
-                payload = asyncio.run(
-                    build_summary_payload(
-                        settings,
-                        thread_limit=thread_limit,
-                        result_limit=result_limit,
+                if path == "/":
+                    body = build_summary_shell_html().encode("utf-8")
+                    content_type = "text/html; charset=utf-8"
+                else:
+                    payload = asyncio.run(
+                        build_summary_payload(
+                            settings,
+                            thread_limit=thread_limit,
+                            result_limit=result_limit,
+                        )
                     )
-                )
-                if path == "/api/summary":
                     body = json.dumps(payload, indent=2, ensure_ascii=False).encode("utf-8")
                     content_type = "application/json; charset=utf-8"
-                else:
-                    body = build_summary_html(payload).encode("utf-8")
-                    content_type = "text/html; charset=utf-8"
             except Exception as exc:  # pragma: no cover - runtime diagnostics
                 self.send_error(500, explain=str(exc))
                 return
@@ -130,13 +217,37 @@ def _important_row(item: dict[str, Any]) -> str:
     thread = item["thread"]
     level = str(item["level"])
     signals = ", ".join(signal["signal"].replace("_", " ") for signal in item.get("signals", [])[:4])
+    messages = "".join(_message_block(message) for message in item.get("messages", []))
     return (
         "<tr>"
         f'<td class="level-{escape(level)}">{escape(level.title())}</td>'
-        f"<td>{escape(str(thread.get('title') or '(no subject)'))}<br><small>{escape(str(thread.get('thread_id')))}</small></td>"
+        f'<td><div class="thread-title">{escape(str(thread.get("title") or "(no subject)"))}</div>'
+        f"<small>{escape(str(thread.get('thread_id')))}</small>{messages}</td>"
         f"<td>{escape(str(item.get('score', 0)))}</td>"
         f"<td>{escape(signals)}</td>"
         "</tr>"
+    )
+
+
+def _message_block(message: dict[str, Any]) -> str:
+    sender = escape(str(message.get("sender_name") or "Unknown sender"))
+    sent_at = message.get("sent_at")
+    meta = sender if not sent_at else f"{sender} - {escape(str(sent_at))}"
+    body = escape(str(message.get("body_text") or "(no message text)"))
+    attachments = [
+        str(attachment.get("filename") or attachment.get("attachment_id"))
+        for attachment in message.get("attachments", [])
+        if attachment.get("filename") or attachment.get("attachment_id")
+    ]
+    attachment_html = ""
+    if attachments:
+        attachment_html = f'<div class="attachments">Attachments: {escape(", ".join(attachments))}</div>'
+    return (
+        '<div class="message">'
+        f'<div class="message-meta">{meta}</div>'
+        f'<div class="message-body">{body}</div>'
+        f"{attachment_html}"
+        "</div>"
     )
 
 

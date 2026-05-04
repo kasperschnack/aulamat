@@ -8,6 +8,8 @@ __pycache__/
 .ruff_cache/
 .aula_tokens.json
 .aula_scan_state.json
+.aula_service*.log
+.*aula-project*.log
 *.tokens.json
 .aula_raw/
 HANDOVER_PROMPT.md

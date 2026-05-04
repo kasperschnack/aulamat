@@ -8,14 +8,17 @@ from typing import Any
 
 
 DEFAULT_SERVICE_LABEL = "dk.local.aula-project.notify"
+DEFAULT_SUMMARY_SERVICE_LABEL = "dk.local.aula-project.summary"
+DEFAULT_SUMMARY_SERVER_PORT = 8767
 
 
 @dataclass(slots=True)
 class LaunchdService:
     label: str
     plist_path: Path
-    interval_minutes: int
+    interval_minutes: int | None
     command: list[str]
+    keep_alive: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -23,6 +26,7 @@ class LaunchdService:
             "plist_path": str(self.plist_path),
             "interval_minutes": self.interval_minutes,
             "command": self.command,
+            "keep_alive": self.keep_alive,
         }
 
 
@@ -61,18 +65,59 @@ def build_launchd_service(
     )
 
 
+def build_summary_launchd_service(
+    *,
+    project_dir: Path,
+    host: str = "127.0.0.1",
+    port: int = DEFAULT_SUMMARY_SERVER_PORT,
+    thread_limit: int | None = None,
+    result_limit: int | None = 10,
+    label: str = DEFAULT_SUMMARY_SERVICE_LABEL,
+    plist_dir: Path | None = None,
+) -> LaunchdService:
+    uv_executable = shutil.which("uv") or "uv"
+    command = [
+        uv_executable,
+        "run",
+        "aula-project",
+        "summary-server",
+        "--host",
+        host,
+        "--port",
+        str(port),
+    ]
+    if thread_limit is not None:
+        command.extend(["--thread-limit", str(thread_limit)])
+    if result_limit is not None:
+        command.extend(["--limit", str(result_limit)])
+
+    resolved_plist_dir = plist_dir or default_launch_agents_dir()
+    return LaunchdService(
+        label=label,
+        plist_path=resolved_plist_dir / f"{label}.plist",
+        interval_minutes=None,
+        command=command,
+        keep_alive=True,
+    )
+
+
 def launchd_plist(service: LaunchdService, *, project_dir: Path) -> dict[str, Any]:
-    log_path = project_dir / ".aula_service.log"
-    error_log_path = project_dir / ".aula_service.err.log"
-    return {
+    log_stem = service.label.replace(".", "_")
+    log_path = project_dir / f".{log_stem}.log"
+    error_log_path = project_dir / f".{log_stem}.err.log"
+    payload: dict[str, Any] = {
         "Label": service.label,
         "ProgramArguments": service.command,
         "WorkingDirectory": str(project_dir),
         "RunAtLoad": True,
-        "StartInterval": service.interval_minutes * 60,
         "StandardOutPath": str(log_path),
         "StandardErrorPath": str(error_log_path),
     }
+    if service.interval_minutes is not None:
+        payload["StartInterval"] = service.interval_minutes * 60
+    if service.keep_alive:
+        payload["KeepAlive"] = True
+    return payload
 
 
 def write_launchd_plist(service: LaunchdService, *, project_dir: Path) -> Path:

@@ -102,23 +102,28 @@ brew install terminal-notifier
 uv run aula-project notify-new --thread-limit 20
 ```
 
-Install a macOS launchd job that checks every 20 minutes:
+Install macOS launchd jobs for notifications and the always-on summary page:
 
 ```bash
 uv run aula-project install-service --interval-minutes 20 --thread-limit 20 --load
 ```
 
-The service runs `notify-new`, so it refreshes the Aula token when needed, checks for important new messages, sends a notification only when something meets the configured priority, and updates `.aula_scan_state.json` after successful delivery or when no notification is needed.
+This installs two user LaunchAgents:
+
+- `dk.local.aula-project.notify`: runs `notify-new` every 20 minutes, refreshes the Aula token when needed, checks for important new messages, sends a notification only when something meets the configured priority, and updates `.aula_scan_state.json` after successful delivery or when no notification is needed.
+- `dk.local.aula-project.summary`: keeps `summary-server` running at `http://127.0.0.1:8767/`. The page fetches fresh Aula data whenever it is opened or refreshed.
+
+Use `--no-summary-server` if you only want the periodic notification checker.
 
 ## Summary Server
 
-Run a local summary page:
+Run a local summary page manually:
 
 ```bash
 uv run aula-project summary-server --thread-limit 20 --limit 10
 ```
 
-Then open `http://127.0.0.1:8765/`. JSON is available at `http://127.0.0.1:8765/api/summary`.
+Then open `http://127.0.0.1:8767/`. JSON is available at `http://127.0.0.1:8767/api/summary`.
 
 The current implementation reads the Aula profile, message threads, and full messages for those threads. It does not yet fetch calendar events, absence records, documents, galleries, Meebook plans beyond message-thread payloads, or other Aula modules.
 
