@@ -127,6 +127,41 @@ Then open `http://127.0.0.1:8767/`. JSON is available at `http://127.0.0.1:8767/
 
 The current implementation reads the Aula profile, message threads, and full messages for those threads. It does not yet fetch calendar events, absence records, documents, galleries, Meebook plans beyond message-thread payloads, or other Aula modules.
 
+## Docker Deployment
+
+The summary server can run in Docker with token and scan-state files stored in a named volume. First copy `.env.example` to `.env` on the server and set at least `AULA_MITID_USERNAME`.
+
+Build the image:
+
+```bash
+docker compose build
+```
+
+Run the first interactive Aula login inside the container:
+
+```bash
+docker compose run --rm aula-summary aula-project login
+```
+
+That command writes `/data/.aula_tokens.json` into the `aula-data` Docker volume. The running server reuses and refreshes that cache.
+
+Start the summary server:
+
+```bash
+docker compose up -d
+```
+
+By default, `compose.yml` publishes the page only on the server loopback interface at `http://127.0.0.1:8767/`. Put a reverse proxy in front of it for remote access, or change the port binding to `8767:8767` if you intentionally want Docker to listen on all interfaces.
+
+Useful server commands:
+
+```bash
+docker compose logs -f aula-summary
+docker compose exec aula-summary aula-project auth-status
+docker compose run --rm aula-summary aula-project login
+docker compose down
+```
+
 ## Environment
 
 - `AULA_MITID_USERNAME`: MitID username used for Aula login

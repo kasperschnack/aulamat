@@ -1,0 +1,17 @@
+services:
+  aula-summary:
+    build: .
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      AULA_TOKEN_CACHE_PATH: /data/.aula_tokens.json
+      AULA_SCAN_STATE_PATH: /data/.aula_scan_state.json
+      AULA_RAW_CAPTURE_DIR: /data/.aula_raw
+    ports:
+      - "127.0.0.1:8767:8767"
+    volumes:
+      - aula-data:/data
+
+volumes:
+  aula-data:

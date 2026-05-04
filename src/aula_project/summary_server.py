@@ -30,7 +30,11 @@ def build_summary_shell_html() -> str:
     .thread-title { font-weight: 700; }
     .message { margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid #edf2f7; }
     .message-meta { color: #52606d; font-size: 0.85rem; margin-bottom: 0.25rem; }
-    .message-body { white-space: pre-wrap; line-height: 1.45; }
+    .message-preview { line-height: 1.45; }
+    .message-full-text { margin-top: 0.4rem; }
+    .message-full-text summary { display: inline-block; cursor: pointer; border: 1px solid #bcccdc; border-radius: 6px; padding: 0.25rem 0.55rem; color: #243b53; font-size: 0.85rem; }
+    .message-full-text summary:hover { background: #f0f4f8; }
+    .message-body { margin-top: 0.45rem; white-space: pre-wrap; line-height: 1.45; }
     .attachments { color: #52606d; font-size: 0.85rem; margin-top: 0.35rem; }
     .level-high { color: #b42318; font-weight: 700; }
     .level-medium { color: #9a6700; font-weight: 700; }
@@ -55,6 +59,11 @@ def build_summary_shell_html() -> str:
       "'": "&#39;",
     }[char]));
 
+    const truncate = (value, limit) => {
+      const text = String(value ?? "");
+      return text.length <= limit ? text : `${text.slice(0, limit - 1).trimEnd()}...`;
+    };
+
     const render = (payload) => {
       const profile = payload.profile || {};
       const profileName = profile.display_name || profile.profile_id || "Unavailable";
@@ -68,7 +77,9 @@ def build_summary_shell_html() -> str:
         const messages = (item.messages || []).map((message) => {
           const attachments = (message.attachments || []).map((attachment) => attachment.filename || attachment.attachment_id).filter(Boolean);
           const attachmentHtml = attachments.length ? `<div class="attachments">Attachments: ${escapeHtml(attachments.join(", "))}</div>` : "";
-          return `<div class="message"><div class="message-meta">${escapeHtml(message.sender_name || "Unknown sender")}${message.sent_at ? ` - ${escapeHtml(message.sent_at)}` : ""}</div><div class="message-body">${escapeHtml(message.body_text || "(no message text)")}</div>${attachmentHtml}</div>`;
+          const bodyText = message.body_text || "(no message text)";
+          const preview = truncate(bodyText.replace(/\\s+/g, " ").trim(), 180);
+          return `<div class="message"><div class="message-meta">${escapeHtml(message.sender_name || "Unknown sender")}${message.sent_at ? ` - ${escapeHtml(message.sent_at)}` : ""}</div><div class="message-preview">${escapeHtml(preview)}</div><details class="message-full-text"><summary>Full text</summary><div class="message-body">${escapeHtml(bodyText)}</div></details>${attachmentHtml}</div>`;
         }).join("");
         return `<tr><td class="level-${escapeHtml(level)}">${escapeHtml(level.charAt(0).toUpperCase() + level.slice(1))}</td><td><div class="thread-title">${escapeHtml(thread.title || "(no subject)")}</div><small>${escapeHtml(thread.thread_id)}</small>${messages}</td><td>${escapeHtml(item.score || 0)}</td><td>${escapeHtml(signals)}</td></tr>`;
       }).join("");
@@ -122,7 +133,11 @@ def build_summary_html(payload: dict[str, Any]) -> str:
     .thread-title {{ font-weight: 700; }}
     .message {{ margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid #edf2f7; }}
     .message-meta {{ color: #52606d; font-size: 0.85rem; margin-bottom: 0.25rem; }}
-    .message-body {{ white-space: pre-wrap; line-height: 1.45; }}
+    .message-preview {{ line-height: 1.45; }}
+    .message-full-text {{ margin-top: 0.4rem; }}
+    .message-full-text summary {{ display: inline-block; cursor: pointer; border: 1px solid #bcccdc; border-radius: 6px; padding: 0.25rem 0.55rem; color: #243b53; font-size: 0.85rem; }}
+    .message-full-text summary:hover {{ background: #f0f4f8; }}
+    .message-body {{ margin-top: 0.45rem; white-space: pre-wrap; line-height: 1.45; }}
     .attachments {{ color: #52606d; font-size: 0.85rem; margin-top: 0.35rem; }}
     .level-high {{ color: #b42318; font-weight: 700; }}
     .level-medium {{ color: #9a6700; font-weight: 700; }}
@@ -233,7 +248,9 @@ def _message_block(message: dict[str, Any]) -> str:
     sender = escape(str(message.get("sender_name") or "Unknown sender"))
     sent_at = message.get("sent_at")
     meta = sender if not sent_at else f"{sender} - {escape(str(sent_at))}"
-    body = escape(str(message.get("body_text") or "(no message text)"))
+    body_text = str(message.get("body_text") or "(no message text)")
+    preview = escape(_truncate_single_line(body_text, 180))
+    body = escape(body_text)
     attachments = [
         str(attachment.get("filename") or attachment.get("attachment_id"))
         for attachment in message.get("attachments", [])
@@ -245,10 +262,18 @@ def _message_block(message: dict[str, Any]) -> str:
     return (
         '<div class="message">'
         f'<div class="message-meta">{meta}</div>'
-        f'<div class="message-body">{body}</div>'
+        f'<div class="message-preview">{preview}</div>'
+        f'<details class="message-full-text"><summary>Full text</summary><div class="message-body">{body}</div></details>'
         f"{attachment_html}"
         "</div>"
     )
+
+
+def _truncate_single_line(value: str, limit: int) -> str:
+    text = " ".join(value.split())
+    if len(text) <= limit:
+        return text
+    return text[: limit - 1].rstrip() + "..."
 
 
 def _auth_summary(status: Any) -> dict[str, Any]:

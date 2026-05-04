@@ -108,6 +108,8 @@ def test_summary_html_renders_important_threads() -> None:
 
     assert "Aula Summary" in html
     assert "Tur på fredag" in html
+    assert '<details class="message-full-text">' in html
+    assert "<summary>Full text</summary>" in html
     assert "Husk madpakke og regntøj." in html
     assert "program.pdf" in html
     assert "response requested" in html
