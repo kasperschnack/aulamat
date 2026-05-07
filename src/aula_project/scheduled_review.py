@@ -217,6 +217,18 @@ def _is_new_message(message: MessageItem, state: ScanState, previous_checked: da
     return sent_at > previous_checked
 
 
+def thread_may_have_new_messages(thread: MessageThread, state: ScanState) -> bool:
+    previous_checked = _parse_timestamp(state.last_checked_at)
+    if previous_checked is None:
+        return True
+
+    last_message_at = _parse_timestamp(thread.last_message_at)
+    if last_message_at is None:
+        return True
+
+    return last_message_at > previous_checked
+
+
 def build_new_thread_messages(
     threads: list[MessageThread],
     messages_by_thread_id: dict[str, list[MessageItem]],

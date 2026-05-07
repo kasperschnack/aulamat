@@ -14,7 +14,12 @@ from aula_project.models import AuthCacheStatus, AuthResult, MessageItem, Messag
 from aula_project.normalize import normalize_messages, normalize_profile, normalize_threads
 from aula_project.openai_review import review_new_messages_with_openai
 from aula_project.scan_state import ScanState, load_scan_state, save_scan_state, utc_now_iso
-from aula_project.scheduled_review import ScheduledReviewResult, build_new_thread_messages, mark_reviewed
+from aula_project.scheduled_review import (
+    ScheduledReviewResult,
+    build_new_thread_messages,
+    mark_reviewed,
+    thread_may_have_new_messages,
+)
 from aula_project.triage import assess_thread, rank_threads
 
 
@@ -193,6 +198,10 @@ class AulaDataClient:
             cache_changed = False
             messages_by_thread_id: dict[str, list[MessageItem]] = {}
             for thread in threads:
+                if not thread_may_have_new_messages(thread, review_state):
+                    messages_by_thread_id[thread.thread_id] = []
+                    continue
+
                 messages, fetched = await self._messages_for_thread(
                     session.client,
                     thread,

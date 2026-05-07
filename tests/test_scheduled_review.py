@@ -11,6 +11,7 @@ from aula_project.scheduled_review import (
     build_new_thread_messages,
     build_openai_prompt_input,
     mark_reviewed,
+    thread_may_have_new_messages,
 )
 
 
@@ -104,6 +105,26 @@ def test_mark_reviewed_updates_checkpoint_and_seen_ids() -> None:
 
     assert state.last_checked_at == "2026-04-29T11:00:00Z"
     assert state.seen_message_ids == {"old-msg", "new-msg"}
+
+
+def test_thread_may_have_new_messages_skips_threads_before_checkpoint() -> None:
+    state = ScanState(last_checked_at="2026-04-29T11:00:00Z")
+
+    old_thread = MessageThread(
+        thread_id="old-thread",
+        source=MessageSource.AULA,
+        last_message_at="2026-04-29T10:59:59Z",
+    )
+    new_thread = MessageThread(
+        thread_id="new-thread",
+        source=MessageSource.AULA,
+        last_message_at="2026-04-29T11:00:01Z",
+    )
+    unknown_thread = MessageThread(thread_id="unknown-thread", source=MessageSource.AULA)
+
+    assert thread_may_have_new_messages(old_thread, state) is False
+    assert thread_may_have_new_messages(new_thread, state) is True
+    assert thread_may_have_new_messages(unknown_thread, state) is True
 
 
 def test_openai_prompt_input_excludes_raw_payloads() -> None:
